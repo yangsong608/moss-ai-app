@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: 构建与自测
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 锁文件安装；漂移时直接失败。协议包是内嵌副本，单独装一份。
+      - name: 安装依赖（应用 / 协议）
+        run: |
+          npm ci
+          npm --prefix protocol ci
+
+      - name: 类型检查 + 协议自测 + H5 构建
+        run: npm run check

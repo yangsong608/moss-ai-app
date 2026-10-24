@@ -67,7 +67,19 @@ moss-ai-app/
 - **渲染工具的本机依赖**：`tools/moss-render/*.mjs` 里写死了 `/Applications/Google Chrome.app/...` 与本工程的绝对路径，换机器要改。
 - **`.hbuilderx/`** 是 HBuilderX 的运行配置，仅本机使用。
 
+## 迁移遗留与已知问题（2026-10-24 盘点）
+
+| 事项 | 状态 |
+|---|---|
+| **git 历史** | 迁移前的 43 个逐文件提交保存在 **`legacy-history`** 分支（自 dsh-link-suite 用 `git subtree split` 拆出）；`main` 是独立快照，两者内容连续但历史不合并。查旧 blame：`git log legacy-history -- src/...` |
+| **CI** | 迁移当天已补 `.github/workflows/ci.yml`（npm ci + typecheck + 协议自测 + H5 构建）；在补之前新仓库一度没有 CI |
+| **锁文件** | 迁移时改名导致 package-lock 根 name 停在 `@dsh-link/app`，已同步为 `moss-ai-app`（`npm ci` 不受影响，纯元数据） |
+| **tools/moss-render 的 mock 数据** | `ui-harness.mjs` / `shot-files.mjs` 里 `app/src/core/upload.ts` 等是截图 fixture 的假路径，不是真实引用；仅观感问题 |
+| **assets3d 符号链接** | `tools/moss-render/assets3d` 指向 `dsh-pet-liang/assets3d` 的**绝对路径**链接，换机器/移动目录需重建 |
+| **跨仓工具** | dsh-link-suite 的 `npm run shots:app` 会来本工程取 `dist/build/h5`，两工程需同级放在工作区根 |
+
 ## 历史
 
 - 2026-10-24：从 `dsh-link-suite/app/` 独立为 `moss-ai-app/`，内嵌协议包、修正 moss-render 路径、更新两侧文档。
-- 更早的迭代记录见 `dsh-link-suite/docs/`（02 技术方案、07 详细设计、13 验收状态）与 `dsh-link-suite/docs/screenshots/`。
+- 2026-10-24：修复会话内 dsh-ui 卡片不渲染（genui 子集对齐 dsh-genui 0.14.0：容器展平 / 缺 type 推断 / 围栏语言规范化）；补 CI、同步锁文件、历史存入 `legacy-history` 分支。
+- 更早的迭代记录见 `dsh-link-suite/docs/`（02 技术方案、07 详细设计、13 验收状态）与 `dsh-link-suite/docs/screenshots/`；逐文件历史在 `legacy-history` 分支。
