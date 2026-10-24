@@ -2,11 +2,12 @@
 /**
  * 今天（默认屏）。
  *
- * 一屏回答三件事：现在什么进度（大日期 + 环形进度）、今天还有什么（清单 / 看板）、
+ * 一屏回答三件事：现在什么进度（大日期 + 环形进度）、今天还有什么（清单 / 看板 / 历史）、
  * 顺手记一件（快速记录，回车连建、不打断输入）。
  *
  * 数据全部来自 @/core/workbench；本页只做投影和写动作，不自己存状态。
  * 环形进度点击 = 清已完成（必须二次确认，删除是不可逆的）。
+ * 任务行长按（或点右侧 ⋯）= 编辑 / 删除；历史视图里的完成记录可恢复或删除。
  */
 import { computed, reactive, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
@@ -18,10 +19,13 @@ import {
   deviceName,
   domainStats,
   groupOf,
+  historyTasks,
   isoDay,
+  removeTask,
   switchDevice,
   toggleTask,
   todayTasks,
+  updateTask,
   useWork,
   work,
   workDevices,
@@ -37,6 +41,17 @@ const NOW = new Date()
 const TODAY = isoDay()
 const weekday = WEEKDAYS[NOW.getDay()]
 const monthDay = `${NOW.getMonth() + 1}月${NOW.getDate()}日`
+
+/** 周一为一周起点（与日历页一致），历史分组的「本周」按它切。 */
+function weekStartOf(iso: string): string {
+  const p = iso.split('-')
+  const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]))
+  const dow = (d.getDay() + 6) % 7
+  d.setDate(d.getDate() - dow)
+  return isoDay(d)
+}
+
+const WEEK_START = weekStartOf(TODAY)
 
 /** 环形进度与指标都按当前设备域的全量任务算（与 domainStats 口径一致）。 */
 const stats = computed(() => domainStats(data.value))
@@ -125,9 +140,10 @@ function addQuick(e?: any): void {
   keepFocus()
 }
 
-/* ── 清单 / 看板 / 筛选 ────────────────────────────────────────────── */
+/* ── 清单 / 看板 / 历史 / 筛选 ─────────────────────────────────────── */
 
-const taskView = ref<'list' | 'board'>('list')
+type TaskView = 'list' | 'board' | 'history'
+const taskView = ref<TaskView>('list')
 
 type FilterMode = 'all' | 'high' | 'sub'
 const filterMode = ref<FilterMode>('all')
@@ -184,7 +200,53 @@ const board = computed<BoardCol[]>(() => {
   ]
 })
 
-function setView(v: 'list' | 'board'): void {
+interface HistoryGroupView {
+  key: 'today' | 'week' | 'earlier'
+  label: string
+  icon: string
+  items: Task[]
+  hint: string
+}
+
+/** 完成时间按本地时区折算成 ISO 日期，跨天判断不受 UTC 偏移影响。 */
+function completedIso(t: Task): string {
+  return isoDay(new Date(t.updatedAt))
+}
+
+function hhmm(ts: number): string {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** 历史行的完成时间：今天 / 本周带星期 / 更早带月日。 */
+function completedLabel(t: Task): string {
+  const day = completedIso(t)
+  if (day === TODAY) return `今天 ${hhmm(t.updatedAt)}`
+  const d = new Date(t.updatedAt)
+  if (day >= WEEK_START) return `${WEEKDAYS[d.getDay()]} ${hhmm(t.updatedAt)}`
+  const year = d.getFullYear() === NOW.getFullYear() ? '' : `${d.getFullYear()}年`
+  return `${year}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm(t.updatedAt)}`
+}
+
+/** 历史 = 已完成，按完成时间倒序，再切成 今天 / 本周 / 更早。 */
+const historyGroups = computed<HistoryGroupView[]>(() => {
+  const buckets: Record<HistoryGroupView['key'], Task[]> = { today: [], week: [], earlier: [] }
+  historyTasks(data.value.tasks).forEach((t) => {
+    const day = completedIso(t)
+    if (day === TODAY) buckets.today.push(t)
+    else if (day >= WEEK_START) buckets.week.push(t)
+    else buckets.earlier.push(t)
+  })
+  return [
+    { key: 'today', label: '今天', icon: '✓', items: buckets.today, hint: '今天还没有完成的任务' },
+    { key: 'week', label: '本周', icon: '◷', items: buckets.week, hint: '本周早些时候没有完成的任务' },
+    { key: 'earlier', label: '更早', icon: '▤', items: buckets.earlier, hint: '更早没有完成的任务' },
+  ]
+})
+
+const historyCount = computed(() => historyGroups.value.reduce((n, g) => n + g.items.length, 0))
+
+function setView(v: TaskView): void {
   if (taskView.value === v) return
   taskView.value = v
   haptic('light')
@@ -207,10 +269,24 @@ function toggleGroup(key: TaskGroup): void {
 const detailOpen = ref(false)
 const detailId = ref('')
 
-function openTask(id: string): void {
+/** 长按菜单与删除确认共用一份目标状态：同一时间只允许一个浮层。 */
+const menuOpen = ref(false)
+const menuTask = ref<Task | null>(null)
+const deleteTarget = ref<Task | null>(null)
+
+/** 长按后补发的那次 tap 不应再开详情（手机端 longpress 后仍可能触发 tap）。 */
+let swallowTapUntil = 0
+
+function showTask(id: string): void {
   detailId.value = id
   detailOpen.value = true
   haptic('light')
+}
+
+function openTask(id: string): void {
+  // 菜单 / 确认框开着时，底下的行不该被点穿；长按松手的补发 tap 也要吞掉
+  if (menuOpen.value || deleteTarget.value !== null || Date.now() < swallowTapUntil) return
+  showTask(id)
 }
 
 function toggle(id: string): void {
@@ -227,6 +303,70 @@ function subText(t: Task): string {
 
 function isDue(t: Task): boolean {
   return /截止|逾期/.test(t.when)
+}
+
+/* ── 长按操作菜单 / 删除 ───────────────────────────────────────────── */
+
+function openRowMenu(t: Task): void {
+  if (menuOpen.value || deleteTarget.value !== null) return
+  menuTask.value = t
+  menuOpen.value = true
+  // 长按松手时补齐的 tap 会落在同一行上：吞掉一次，避免菜单刚开又弹详情
+  swallowTapUntil = Date.now() + 700
+  haptic('medium')
+}
+
+function closeMenu(): void {
+  menuOpen.value = false
+  menuTask.value = null
+}
+
+function editFromMenu(): void {
+  const t = menuTask.value
+  closeMenu()
+  swallowTapUntil = 0
+  if (t !== null) showTask(t.id)
+}
+
+function askDelete(t: Task): void {
+  menuOpen.value = false
+  menuTask.value = null
+  deleteTarget.value = t
+  haptic('light')
+}
+
+function deleteFromMenu(): void {
+  const t = menuTask.value
+  closeMenu()
+  if (t !== null) askDelete(t)
+}
+
+function cancelDelete(): void {
+  deleteTarget.value = null
+}
+
+function confirmDelete(): void {
+  const t = deleteTarget.value
+  if (t === null) return
+  removeTask(t.id)
+  deleteTarget.value = null
+  if (detailOpen.value && detailId.value === t.id) detailOpen.value = false
+  haptic('heavy')
+  toast('已删除任务 · 待同步到其他端')
+}
+
+/* ── 历史动作：恢复 / 日历 ─────────────────────────────────────────── */
+
+function restoreTask(id: string): void {
+  updateTask(id, { done: false })
+  haptic('medium')
+  toast('已恢复为未完成 · 回到清单')
+}
+
+/** 只做跳转：日历页按自己的选中日期展示，本页不改它的状态。 */
+function openCalendar(): void {
+  haptic('light')
+  uni.reLaunch({ url: '/pages/calendar/calendar' })
 }
 
 /* ── 清已完成（二次确认） ──────────────────────────────────────────── */
@@ -333,8 +473,9 @@ function doClear(): void {
         <view class="seg">
           <view class="seg-btn" :class="{ on: taskView === 'list' }" @tap="setView('list')"><text>清单</text></view>
           <view class="seg-btn" :class="{ on: taskView === 'board' }" @tap="setView('board')"><text>看板</text></view>
+          <view class="seg-btn" :class="{ on: taskView === 'history' }" @tap="setView('history')"><text>历史</text></view>
         </view>
-        <view class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
+        <view v-if="taskView !== 'history'" class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
           <text>{{ FILTER_LABEL[filterMode] }}</text>
         </view>
       </view>
@@ -359,6 +500,7 @@ function doClear(): void {
               class="trow"
               :class="{ done: t.done, cur: detailOpen && detailId === t.id }"
               @tap="openTask(t.id)"
+              @longpress="openRowMenu(t)"
             >
               <view class="check" :class="{ on: t.done }" @tap.stop="toggle(t.id)">
                 <text class="cg">✓</text>
@@ -378,7 +520,10 @@ function doClear(): void {
               </view>
               <view class="tright">
                 <text class="twhen mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
-                <view v-if="t.sync" class="syncdot" />
+                <view class="tright-r">
+                  <view v-if="t.sync" class="syncdot" />
+                  <view class="tmenu" @tap.stop="openRowMenu(t)"><text class="tmenu-g">⋯</text></view>
+                </view>
               </view>
             </view>
             <view v-if="g.items.length === 0" class="gempty">{{ g.hint }}</view>
@@ -387,7 +532,7 @@ function doClear(): void {
       </view>
 
       <!-- 看板 -->
-      <scroll-view v-else scroll-x class="board-scroll" :show-scrollbar="false">
+      <scroll-view v-else-if="taskView === 'board'" scroll-x class="board-scroll" :show-scrollbar="false">
         <view class="board">
           <view v-for="col in board" :key="col.key" class="bcol">
             <view class="bh">
@@ -395,7 +540,14 @@ function doClear(): void {
               <text class="bt">{{ col.label }}</text>
               <text class="mono bn">{{ col.items.length }}</text>
             </view>
-            <view v-for="t in col.items" :key="t.id" class="bcard" :class="t.pri" @tap="openTask(t.id)">
+            <view
+              v-for="t in col.items"
+              :key="t.id"
+              class="bcard"
+              :class="t.pri"
+              @tap="openTask(t.id)"
+              @longpress="openRowMenu(t)"
+            >
               <text class="bct">{{ t.title }}</text>
               <view class="bcm">
                 <text class="bchip mono">{{ t.when }}</text>
@@ -407,6 +559,91 @@ function doClear(): void {
           </view>
         </view>
       </scroll-view>
+
+      <!-- 历史：已完成，按完成时间倒序，分 今天 / 本周 / 更早 -->
+      <view v-else class="history">
+        <view class="history-hint">
+          <text class="hh-t">完成记录</text>
+          <text class="mono hh-n">{{ historyCount }} 项 · 按完成时间倒序</text>
+        </view>
+
+        <template v-if="historyCount > 0">
+          <view v-for="g in historyGroups" :key="g.key" class="group">
+            <view class="ghead">
+              <view class="gi" :class="{ mut: g.key !== 'today' }"><text>{{ g.icon }}</text></view>
+              <text class="gt">{{ g.label }}</text>
+              <text class="mono gn">{{ g.items.length }}</text>
+              <view class="sp" />
+            </view>
+            <view class="gbody">
+              <view v-for="t in g.items" :key="t.id" class="hrow" @tap="openTask(t.id)">
+                <view class="hbody">
+                  <text class="ht">{{ t.title }}</text>
+                  <view class="hmeta">
+                    <text class="hmi time mono">完成 {{ completedLabel(t) }}</text>
+                    <text class="hmi dev">{{ t.dev }}</text>
+                    <text v-if="t.date !== ''" class="hmi date">任务日期 {{ t.date }}</text>
+                  </view>
+                </view>
+                <view class="hacts">
+                  <view class="hact" @tap.stop="restoreTask(t.id)"><text>恢复为未完成</text></view>
+                  <view class="hact cal" @tap.stop="openCalendar"><text>在日历中查看</text></view>
+                  <view class="hact del" @tap.stop="askDelete(t)"><text>删除</text></view>
+                </view>
+              </view>
+              <view v-if="g.items.length === 0" class="gempty">{{ g.hint }}</view>
+            </view>
+          </view>
+        </template>
+
+        <view v-else class="history-empty">
+          <text class="he-g">◷</text>
+          <text class="he-t">还没有完成记录</text>
+          <text class="he-d">完成的任务会出现在这里，可恢复为未完成或按日期去日历回看。</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 长按操作菜单（页面自绘，与全应用弹层观感一致） -->
+    <view v-if="menuOpen" class="mask menu-mask" @tap="closeMenu">
+      <view class="menu" @tap.stop>
+        <view class="grab" />
+        <view class="menu-head">
+          <text class="menu-title">{{ menuTask?.title ?? '任务' }}</text>
+          <text class="menu-sub">选择要做的操作</text>
+        </view>
+        <view class="menu-item" @tap="editFromMenu">
+          <view class="mi-ic"><text>✎</text></view>
+          <view class="mi-body">
+            <text class="mi-t">编辑</text>
+            <text class="mi-h">打开任务详情，改标题 / 日期 / 子待办</text>
+          </view>
+          <view class="chev" />
+        </view>
+        <view class="menu-sep" />
+        <view class="menu-item danger" @tap="deleteFromMenu">
+          <view class="mi-ic"><text>✕</text></view>
+          <view class="mi-body">
+            <text class="mi-t">删除</text>
+            <text class="mi-h">从当前设备域移除，并同步到其它端</text>
+          </view>
+        </view>
+        <view class="menu-cancel" @tap="closeMenu"><text>取消</text></view>
+      </view>
+    </view>
+
+    <!-- 删除任务：二次确认 -->
+    <view v-if="deleteTarget !== null" class="mask" @tap="cancelDelete">
+      <view class="modal" @tap.stop>
+        <text class="mh">删除「{{ deleteTarget.title }}」？</text>
+        <text class="mb">
+          会从「{{ deviceName() }}」数据域移除这条任务，并打 tombstone 同步到其他端。删除后不可撤销；只想从清单收走的话，用「完成」。
+        </text>
+        <view class="mf">
+          <view class="btn ghost" @tap="cancelDelete"><text>取消</text></view>
+          <view class="btn danger" @tap="confirmDelete"><text>删除任务</text></view>
+        </view>
+      </view>
     </view>
 
     <!-- 任务详情抽屉 -->
@@ -682,7 +919,7 @@ function doClear(): void {
 
 .seg-btn {
   height: 27px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -891,6 +1128,26 @@ function doClear(): void {
   background: var(--warn);
 }
 
+/* 右侧：同步点 + 更多入口（长按的可见替代，桌面也能点） */
+.tright-r {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tmenu {
+  width: 24px;
+  height: 24px;
+  margin: -4px -4px -4px 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--t3);
+}
+
+.tmenu:active { background: var(--s3); color: var(--t1); }
+.tmenu-g { font-size: 15px; line-height: 1; letter-spacing: 1px; }
+
 .gempty {
   padding: 14px 10px 16px;
   text-align: center;
@@ -899,6 +1156,142 @@ function doClear(): void {
   color: var(--t3);
   border: 1px dashed var(--bd);
   border-radius: var(--r-md);
+}
+
+/* ── 历史视图 ───────────────────────────────────────────────────── */
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-hint {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.hh-t {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--t2);
+}
+
+.hh-n {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--t3);
+}
+
+.hrow {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--bd);
+  background: var(--s1);
+  transition: background var(--t-fast) var(--ease-out);
+}
+
+.hrow:active { background: var(--s2); }
+
+.hbody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ht {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--t2);
+  word-break: break-word;
+}
+
+.hmeta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.hmi {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--t3);
+  background: var(--s2);
+  border: 1px solid var(--bd);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+
+.hmi.time {
+  color: var(--acc);
+  background: var(--acc-soft);
+  border-color: transparent;
+}
+
+.hmi.date { color: var(--t2); }
+
+.hacts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hact {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t2);
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+}
+
+.hact:active { background: var(--s3); }
+
+.hact.cal {
+  color: var(--acc);
+  background: var(--acc-soft);
+  border-color: transparent;
+}
+
+.hact.del {
+  margin-left: auto;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: transparent;
+}
+
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 16px;
+  border: 1px dashed var(--bd);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.he-g { font-size: 22px; color: var(--t3); line-height: 1; }
+.he-t { font-size: 12px; font-weight: 600; color: var(--t2); }
+
+.he-d {
+  max-width: 260px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--t3);
 }
 
 /* ── 看板 ───────────────────────────────────────────────────────── */
@@ -1020,6 +1413,120 @@ function doClear(): void {
   border-radius: var(--r-sm);
 }
 
+/* ── 长按操作菜单 ───────────────────────────────────────────────── */
+
+.mask.menu-mask {
+  align-items: flex-end;
+  padding: 0;
+  z-index: 96;
+}
+
+.menu {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 0 12px calc(10px + var(--safe-bottom-real, 0px));
+  border-top: 1px solid var(--bd-strong);
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  background: var(--s1);
+  box-shadow: 0 -8px 32px color-mix(in srgb, var(--bg-grad-3) 60%, transparent);
+  animation: menu-up var(--t-mid) var(--ease-out);
+}
+
+@keyframes menu-up {
+  from { transform: translateY(18px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.grab {
+  width: 34px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--s3);
+  margin: 8px auto 4px;
+}
+
+.menu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 6px 12px;
+}
+
+.menu-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-sub { font-size: 9.5px; color: var(--t3); }
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 8px;
+  border-radius: 12px;
+}
+
+.menu-item:active { background: var(--s2); }
+
+.mi-ic {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 10px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--acc);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+}
+
+.menu-item.danger .mi-ic {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: transparent;
+}
+
+.mi-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mi-t { font-size: 13.5px; font-weight: 600; color: var(--t1); }
+.menu-item.danger .mi-t { color: var(--danger); }
+.mi-h { font-size: 10px; line-height: 1.5; color: var(--t3); }
+
+.menu-sep {
+  height: 1px;
+  margin: 5px 10px;
+  background: var(--bd);
+}
+
+.menu-cancel {
+  height: 46px;
+  margin: 10px 4px 2px;
+  border-radius: 12px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t2);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.menu-cancel:active { background: var(--s3); }
+
 /* ── 清已完成确认 ───────────────────────────────────────────────── */
 
 .mask {
@@ -1088,6 +1595,12 @@ function doClear(): void {
 .btn.primary {
   background: var(--acc);
   color: var(--acc-ink);
+}
+
+.btn.danger {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-bd);
+  color: var(--danger);
 }
 
 .ph { color: var(--t3); }

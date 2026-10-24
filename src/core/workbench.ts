@@ -82,9 +82,17 @@ export interface NewsItem {
   url: string
 }
 
+export interface Notebook {
+  id: string
+  name: string
+  createdAt: number
+}
+
 export interface DomainData {
   tasks: Task[]
   notes: Note[]
+  /** 笔记本清单（notes.notebook 存名字，清单是名字的来源） */
+  notebooks: Notebook[]
   focus: FocusSession[]
   news: NewsItem[]
 }
@@ -228,8 +236,12 @@ function writeDomain(device: string, data: DomainData): void {
   }
 }
 
+function seedNotebooks(): Notebook[] {
+  return ['工作', '学习', '生活'].map((name, i) => ({ id: `nb-${i + 1}`, name, createdAt: T(5) }))
+}
+
 function seed(device: string): DomainData {
-  return { tasks: seedTasks(), notes: seedNotes(), focus: seedFocus(), news: seedNews() }
+  return { tasks: seedTasks(), notes: seedNotes(), notebooks: seedNotebooks(), focus: seedFocus(), news: seedNews() }
 }
 
 /* ─────────── 响应式状态 ─────────── */
@@ -250,6 +262,13 @@ export function ensureDomain(device = work.deviceId): DomainData {
   const cached = work.domains[device]
   if (cached !== undefined) return cached
   const loaded = readDomain(device) ?? seed(device)
+  // 旧版本没有 notebooks 字段：从笔记里补出来，保证升级不丢
+  if (!Array.isArray(loaded.notebooks) || loaded.notebooks.length === 0) {
+    const names = Array.from(new Set(loaded.notes.map((n) => n.notebook).filter((x) => x.length > 0)))
+    loaded.notebooks = (names.length > 0 ? names : ['工作', '学习', '生活']).map((name, i) => ({
+      id: `nb-${i + 1}`, name, createdAt: Date.now(),
+    }))
+  }
   work.domains[device] = loaded
   if (readDomain(device) === undefined) writeDomain(device, loaded)
   return loaded
@@ -351,6 +370,75 @@ export function clearDone(): number {
   })
   removed.forEach((id) => markDirty(work.deviceId, 'tasks', id, 'delete'))
   return n
+}
+
+/**
+ * 删除任务（不是"完成"）。
+ * 与完成区分：完成会保留在历史里，删除是移除 + 打 tombstone 传播到其它端。
+ */
+export function removeTask(id: string): void {
+  mutate((d) => { d.tasks = d.tasks.filter((t) => t.id !== id) })
+  markDirty(work.deviceId, 'tasks', id, 'delete')
+}
+
+/** 历史任务：已完成，按完成时间倒序（供「历史」视图与日历回看） */
+export function historyTasks(tasks: readonly Task[], limit = 50): Task[] {
+  return tasks
+    .filter((t) => t.done)
+    .slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, limit)
+}
+
+/* ─────────── 笔记本（对齐 PC 端工作台：建/改名/删/移动笔记） ─────────── */
+
+export function addNotebook(name: string): Notebook | undefined {
+  const clean = name.trim()
+  if (clean.length === 0) return undefined
+  const exists = ensureDomain().notebooks.find((n) => n.name === clean)
+  if (exists !== undefined) return exists
+  const nb: Notebook = { id: uid(), name: clean, createdAt: Date.now() }
+  mutate((d) => { d.notebooks.push(nb) })
+  markDirty(work.deviceId, 'notebooks', nb.id, 'upsert')
+  return nb
+}
+
+/** 改名：笔记本清单 + 该本下所有笔记一起改，避免出现"孤儿笔记" */
+export function renameNotebook(from: string, to: string): void {
+  const clean = to.trim()
+  if (clean.length === 0 || clean === from) return
+  mutate((d) => {
+    const nb = d.notebooks.find((n) => n.name === from)
+    if (nb !== undefined) {
+      nb.name = clean
+      markDirty(work.deviceId, 'notebooks', nb.id, 'upsert')
+    }
+    d.notes.forEach((n) => { if (n.notebook === from) n.notebook = clean })
+  })
+  ensureDomain().notes.filter((n) => n.notebook === clean).forEach((n) => {
+    markDirty(work.deviceId, 'notes', n.id, 'upsert')
+  })
+}
+
+/** 删笔记本：笔记不删，落到「未分类」（PC 端也是保内容优先） */
+export function removeNotebook(name: string): void {
+  const FALLBACK = '未分类'
+  mutate((d) => {
+    const nb = d.notebooks.find((n) => n.name === name)
+    d.notebooks = d.notebooks.filter((n) => n.name !== name)
+    if (nb !== undefined) markDirty(work.deviceId, 'notebooks', nb.id, 'delete')
+    d.notes.forEach((n) => { if (n.notebook === name) n.notebook = FALLBACK })
+    if (!d.notebooks.some((n) => n.name === FALLBACK)) {
+      d.notebooks.push({ id: uid(), name: FALLBACK, createdAt: Date.now() })
+    }
+  })
+  ensureDomain().notes.filter((n) => n.notebook === FALLBACK).forEach((n) => {
+    markDirty(work.deviceId, 'notes', n.id, 'upsert')
+  })
+}
+
+export function moveNote(noteId: string, notebook: string): void {
+  updateNote(noteId, { notebook })
 }
 
 export function addFocus(taskId: string, minutes: number, completed: boolean): void {

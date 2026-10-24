@@ -17,6 +17,7 @@ import { state, activeDevice, skinClass, themeClass, liteClass, type DeviceCard 
 import { haptic } from '@/core/haptic'
 import { connectDevice, disconnectManual, refreshAll, currentLink } from '@/core/link'
 import { decodePairUri } from '@dsh-link/protocol'
+import { switchDevice } from '@/core/workbench'
 
 /**
  * 启动动画只在**冷启动**播一次。
@@ -250,6 +251,13 @@ function onBootDone(): void {
   try { uni.setStorageSync('dsh-link/booted', '1') } catch { /* 存不下就退化成每次播 */ }
 }
 
+/**
+ * 选择设备 → 进入工作台。
+ *
+ * 顺序：先激活设备，再把它映射成工作台数据域（域 id 跟宿主 hostId 走，
+ * 同一台 PC 换手机仍是同一份数据），最后 reLaunch 到今天，避免页面栈里
+ * 还留着设备页导致返回时"退不出去"。
+ */
 function open(d: DeviceCard): void {
   haptic('light')
   state.activeId = d.deviceId
@@ -257,7 +265,8 @@ function open(d: DeviceCard): void {
     state.lockDialogFor = d.deviceId
     return
   }
-  uni.navigateTo({ url: '/pages/sessions/sessions' })
+  switchDevice(d.host?.hostId ?? d.deviceId)
+  uni.reLaunch({ url: '/pages/today/today' })
 }
 
 function requestUnlock(): void {

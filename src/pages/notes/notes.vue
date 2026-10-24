@@ -1,22 +1,34 @@
 <script setup lang="ts">
 /**
- * 笔记屏：笔记本 chips 筛选 + 笔记卡列表 + 编辑器。
+ * 笔记屏：笔记本 chips + 笔记卡列表 + 阅读态。
+ *
+ * 两段式：
+ *   列表（轻） → 阅读态（渲染后的 Markdown） → 「编辑」进整页编辑器
+ *   `/pages/note-edit/note-edit?id=xxx`（见 pages/note-edit/note-edit.vue）
  *
  * 断点约定（与原型一致）：
- *   - < 820：列表与编辑器互斥，点开笔记后编辑器 fixed 全屏
- *   - ≥ 820：左列表 / 右编辑器两栏，进页面自动选中第一篇
+ *   - < 820：列表与阅读态互斥，点开笔记后阅读态 fixed 全屏
+ *   - ≥ 820：左列表 / 右阅读两栏，进页面自动读第一篇
  *
- * 自动保存：标题/正文任意输入 → 600ms 防抖后 updateNote；
- * 切笔记、关闭、离开页面都先 flush，保证"看到的就是存下的"。
+ * 为什么列表页不再内嵌编辑器：
+ *   手机上一屏同时放列表与 textarea，键盘弹起后正文只剩三行；
+ *   而且"点开即进入编辑"让人没法先读完再决定改不改。
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
-import { addNote, deviceName, isoDay, removeNote, updateNote, useWork } from '@/core/workbench'
+import MossMarkdown from '@/components/MossMarkdown.vue'
+import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
+import {
+  addNote,
+  addNotebook,
+  isoDay,
+  removeNotebook,
+  renameNotebook,
+  updateNote,
+  useWork,
+} from '@/core/workbench'
 import type { Note } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
-import { stashContext } from '@/core/ai-context'
-import { dispatchNotePolish, liveAiHost } from '@/core/ai-dispatch'
-import type { DispatchOutcome } from '@/core/ai-dispatch'
 
 const { data } = useWork()
 
@@ -24,33 +36,87 @@ const ALL = 'all'
 const FAV = 'fav'
 
 const filter = ref<string>(ALL)
-const editingId = ref('')
-const draftTitle = ref('')
-const draftBody = ref('')
-const saveState = ref<'saved' | 'dirty'>('saved')
+/** 阅读态：正在读哪篇（空 = 没选中）；编辑走独立路由 */
+const readingId = ref('')
 
-const createOpen = ref(false)
-const newNotebook = ref('')
-const customNotebook = ref('')
+/* ─────────── 弹层（菜单 / 确认 / 输入一套控制器） ─────────── */
+
+interface SheetState {
+  visible: boolean
+  kind: 'menu' | 'confirm' | 'prompt' | 'info'
+  title: string
+  message: string
+  items: SheetItem[]
+  value: string
+  placeholder: string
+  confirmText: string
+  onSelect?: (index: number) => void
+  onConfirm?: (text: string) => void
+}
+
+const sheet = reactive<SheetState>({
+  visible: false,
+  kind: 'menu',
+  title: '',
+  message: '',
+  items: [],
+  value: '',
+  placeholder: '',
+  confirmText: '确定',
+})
+
+function openSheet(next: Partial<SheetState>): void {
+  Object.assign(
+    sheet,
+    {
+      kind: 'menu',
+      title: '',
+      message: '',
+      items: [],
+      value: '',
+      placeholder: '',
+      confirmText: '确定',
+      onSelect: undefined,
+      onConfirm: undefined,
+    },
+    next,
+    { visible: true },
+  )
+}
+
+function closeSheet(): void {
+  sheet.visible = false
+}
+
+/** MossSheet 自己会先关再 emit：这里只负责把回调取出来执行，顺序不能反。 */
+function onSheetSelect(index: number): void {
+  const cb = sheet.onSelect
+  closeSheet()
+  cb?.(index)
+}
+
+function onSheetConfirm(text: string): void {
+  const cb = sheet.onConfirm
+  closeSheet()
+  cb?.(text)
+}
+
+/* ─────────── 派生数据 ─────────── */
 
 /**
- * AI 完善（P2-1）的页面态：
- *   - aiBusy：派发中 / 等待回写，按钮置灰避免重复派发；
- *   - aiHint：常驻一行状态（成功/超时/降级），比一闪而过的 toast 更有用；
- *   - aiWarn：降级或失败时用警示色；
- *   - aiStop：离开页面时置 true，轮询最多再等一个 tick 就退出。
+ * 笔记本行 = 清单 ∪ 笔记里出现的名字。
+ *
+ * 为什么要并集：同步来的笔记可能指向本地清单里没有的笔记本（旧版本/其它端），
+ * 只按清单展示会让这些笔记在筛选里"消失"。
  */
-const aiBusy = ref(false)
-const aiHint = ref('')
-const aiWarn = ref(false)
-let aiStop = false
-
-let saveTimer: ReturnType<typeof setTimeout> | undefined
-
-const notebooks = computed(() => {
-  const map = new Map<string, number>()
-  for (const n of data.value.notes) map.set(n.notebook, (map.get(n.notebook) ?? 0) + 1)
-  return Array.from(map.entries()).map(([name, count]) => ({ name, count }))
+const notebookRows = computed<{ name: string; count: number }[]>(() => {
+  const counts = new Map<string, number>()
+  for (const n of data.value.notes) counts.set(n.notebook, (counts.get(n.notebook) ?? 0) + 1)
+  const names = data.value.notebooks.map((n) => n.name)
+  for (const name of counts.keys()) {
+    if (!names.includes(name)) names.push(name)
+  }
+  return names.map((name) => ({ name, count: counts.get(name) ?? 0 }))
 })
 const favCount = computed(() => data.value.notes.filter((n) => n.fav).length)
 const filteredNotes = computed<Note[]>(() => {
@@ -62,13 +128,14 @@ const filteredNotes = computed<Note[]>(() => {
   })
   return [...list].sort((a, b) => b.updatedAt - a.updatedAt)
 })
-const activeNote = computed<Note | null>(() => data.value.notes.find((n) => n.id === editingId.value) ?? null)
-const wordCount = computed(() => draftBody.value.replace(/\s+/g, '').length)
-const saveLabel = computed(() => (saveState.value === 'saved' ? '已保存 · 本地' : '待保存…'))
-const pickerNotebooks = computed(() => {
-  const names = notebooks.value.map((n) => n.name)
-  return names.length > 0 ? names : ['默认']
-})
+const readingNote = computed<Note | null>(
+  () => data.value.notes.find((n) => n.id === readingId.value) ?? null,
+)
+const readingWordCount = computed(() =>
+  (readingNote.value?.content ?? '').replace(/\s+/g, '').length,
+)
+
+/* ─────────── 工具 ─────────── */
 
 function toast(title: string): void {
   uni.showToast({ title, icon: 'none', duration: 1800 })
@@ -79,7 +146,7 @@ function summary(n: Note): string {
     .replace(/[#>*`_]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return plain.length > 80 ? `${plain.slice(0, 80)}…` : plain
+  return plain.length > 120 ? `${plain.slice(0, 120)}…` : plain
 }
 
 function timeLabel(ts: number): string {
@@ -94,73 +161,29 @@ function timeLabel(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-function flush(): void {
-  if (saveTimer !== undefined) {
-    clearTimeout(saveTimer)
-    saveTimer = undefined
-  }
-  const id = editingId.value
-  if (id === '') return
-  const note = data.value.notes.find((n) => n.id === id)
-  if (note === undefined) {
-    saveState.value = 'saved'
-    return
-  }
-  if (note.title === draftTitle.value && note.content === draftBody.value) {
-    saveState.value = 'saved'
-    return
-  }
-  updateNote(id, { title: draftTitle.value, content: draftBody.value })
-  saveState.value = 'saved'
-}
-
-function scheduleSave(): void {
-  saveState.value = 'dirty'
-  if (saveTimer !== undefined) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = undefined
-    flush()
-  }, 600)
-}
-
-function loadDraft(note: Note): void {
-  editingId.value = note.id
-  draftTitle.value = note.title
-  draftBody.value = note.content
-  saveState.value = 'saved'
-}
+/* ─────────── 阅读态 / 编辑入口 ─────────── */
 
 function openNote(id: string): void {
-  if (id === editingId.value) return
-  flush()
-  const note = data.value.notes.find((n) => n.id === id)
-  if (note === undefined) return
+  if (readingId.value === id) return
   haptic('light')
-  loadDraft(note)
+  readingId.value = id
 }
 
-function closeEditor(): void {
-  flush()
-  editingId.value = ''
-  draftTitle.value = ''
-  draftBody.value = ''
+function closeReader(): void {
+  haptic('light')
+  readingId.value = ''
 }
 
-function discardEditor(): void {
-  if (saveTimer !== undefined) {
-    clearTimeout(saveTimer)
-    saveTimer = undefined
-  }
-  editingId.value = ''
-  draftTitle.value = ''
-  draftBody.value = ''
-  saveState.value = 'saved'
+/** 编辑：走整页路由（数据层共享同一份 store，返回后阅读态自动是新内容） */
+function openEditor(id: string): void {
+  if (id === '') return
+  haptic('light')
+  uni.navigateTo({ url: `/pages/note-edit/note-edit?id=${id}` })
 }
 
 function setFilter(key: string): void {
   if (filter.value === key) return
   haptic('light')
-  flush()
   filter.value = key
 }
 
@@ -172,174 +195,119 @@ function toggleFav(id: string): void {
   toast(note.fav ? '已取消收藏' : '已收藏')
 }
 
-function confirmDelete(): void {
-  const note = activeNote.value
-  if (note === null) return
-  const title = note.title || '未命名笔记'
-  uni.showModal({
-    title: '删除这篇笔记？',
-    content: `「${title}」删除后不可恢复（M1 没有回收站）。`,
-    confirmText: '删除',
-    cancelText: '取消',
-    success: (res) => {
-      if (!res.confirm) return
-      removeNote(note.id)
-      discardEditor()
+/* ─────────── 新建（选已有笔记本 / 新建笔记本） ─────────── */
+
+function createIn(notebook: string): void {
+  const note = addNote(notebook)
+  filter.value = notebook
+  haptic('medium')
+  // 新笔记是空的：直接进整页编辑器，不在列表里多一步
+  uni.navigateTo({ url: `/pages/note-edit/note-edit?id=${note.id}` })
+}
+
+function promptNewNotebook(mode: 'create-note' | 'only'): void {
+  openSheet({
+    kind: 'prompt',
+    title: '新建笔记本',
+    message: mode === 'create-note' ? '给笔记本取个名字，新笔记会建在里面。' : '给笔记本取个名字。',
+    placeholder: '例如：项目 A',
+    confirmText: '创建',
+    onConfirm: (text) => {
+      const nb = addNotebook(text)
+      if (nb === undefined) {
+        toast('请先填写笔记本名称')
+        return
+      }
       haptic('medium')
-      toast('已删除')
+      filter.value = nb.name
+      if (mode === 'create-note') createIn(nb.name)
+      else toast(`已新建「${nb.name}」`)
     },
   })
 }
 
 function openCreate(): void {
   haptic('light')
-  if (!pickerNotebooks.value.includes(newNotebook.value)) {
-    newNotebook.value = pickerNotebooks.value[0] ?? '默认'
-  }
-  customNotebook.value = ''
-  createOpen.value = true
-}
-
-function createNote(): void {
-  let notebook = newNotebook.value
-  if (notebook === '__new__') {
-    notebook = customNotebook.value.trim()
-    if (notebook === '') {
-      toast('请先填一个笔记本名称')
-      return
-    }
-  }
-  if (notebook === '') notebook = '默认'
-  flush()
-  const note = addNote(notebook)
-  createOpen.value = false
-  customNotebook.value = ''
-  filter.value = notebook
-  loadDraft(note)
-  haptic('medium')
-  toast(`已在「${notebook}」新建笔记`)
-}
-
-/**
- * AI 完善（P2-1）：经设备上的 DSH agent 回写这篇笔记。
- *
- * 流程全在 `ai-dispatch.ts`：先 syncNow() 推一轮（agent 要读得到）→ workspace.list
- * 取第一个 → session.create → session.prompt（指令里带笔记 id 与 workbench_note_update
- * 的硬要求）→ 每 5s 同步一轮，最多 12 次，等这篇笔记的 updatedAt 变化。
- *
- * 离线 / caps 不支持：降级为弹窗说明"只在本机保存"，不假装派发成功。
- */
-async function runPolish(extra: string): Promise<void> {
-  if (aiBusy.value) return
-  const note = activeNote.value
-  if (note === null) return
-  // 先落盘再派发：否则 agent 读到的是 600ms 防抖之前的旧正文
-  flush()
-  const fresh = data.value.notes.find((n) => n.id === note.id)
-  if (fresh === undefined) return
-  haptic('light')
-  aiBusy.value = true
-  aiWarn.value = false
-  aiHint.value = `正在派发给「${deviceName()}」执行…`
-  aiStop = false
-  const requirement = extra.trim()
-  try {
-    const host = await liveAiHost()
-    const outcome = await dispatchNotePolish(
-      host,
-      {
-        noteId: fresh.id,
-        title: draftTitle.value || fresh.title,
-        notebook: fresh.notebook,
-        ...(requirement === '' ? {} : { extra: requirement }),
-      },
-      { shouldStop: () => aiStop },
-    )
-    applyAiOutcome(outcome)
-  } catch (error) {
-    aiWarn.value = true
-    aiHint.value = '派发失败：连接层不可用，内容只在本机保存。'
-    uni.showModal({
-      title: 'AI 完善失败',
-      content: `${aiHint.value}\n\n${error instanceof Error ? error.message : String(error)}`,
-      showCancel: false,
-      confirmText: '知道了',
-    })
-  } finally {
-    aiBusy.value = false
-  }
-}
-
-/** 手机端没有后台任务列表，结果必须"落"在页面上：成功刷新草稿，其余说明原因。 */
-function applyAiOutcome(outcome: DispatchOutcome): void {
-  aiWarn.value = outcome.status !== 'done'
-  aiHint.value = outcome.message
-  if (outcome.status === 'done') {
-    // 拉回来的新正文要立刻进编辑器，否则下一次 flush 会把 AI 的结果覆盖回去
-    const refreshed = data.value.notes.find((n) => n.id === editingId.value)
-    if (refreshed !== undefined) loadDraft(refreshed)
-    haptic('medium')
-    toast('AI 已回写并同步')
-    return
-  }
-  if (outcome.status === 'cancelled') return
-  if (outcome.status === 'timeout') {
-    uni.showToast({ title: '已在设备上执行，稍后自动同步', icon: 'none', duration: 2800 })
-    return
-  }
-  const title = outcome.status === 'degraded'
-    ? (outcome.code === 'no-workbench' ? '设备不支持 AI 回写' : '需要连接设备')
-    : 'AI 完善失败'
-  uni.showModal({ title, content: outcome.message, showCancel: false, confirmText: '知道了' })
-}
-
-function aiPolish(): void {
-  void runPolish('')
-}
-
-/** 「按要求完善」：追加一句要求（如"压缩到 300 字"），其余流程与 AI 完善一致。 */
-function aiPolishWithRequirement(): void {
-  if (aiBusy.value) return
-  if (activeNote.value === null) return
-  uni.showModal({
-    title: '按要求完善',
-    editable: true,
-    placeholderText: '例如：压缩到 300 字，并补一节风险',
-    confirmText: '派发',
-    cancelText: '取消',
-    success: (res) => {
-      if (!res.confirm) return
-      const extra = typeof res.content === 'string' ? res.content.trim() : ''
-      if (extra === '') toast('没有填写要求，按默认方式完善')
-      void runPolish(extra)
+  const names = notebookRows.value.map((n) => n.name)
+  const items: SheetItem[] = names.map((name) => ({ label: name, hint: `新建到「${name}」` }))
+  items.push({ label: '＋ 新建笔记本', hint: '创建笔记本并写第一篇' })
+  openSheet({
+    kind: 'menu',
+    title: '新建笔记',
+    items,
+    onSelect: (index) => {
+      if (index < names.length) {
+        createIn(names[index] as string)
+        return
+      }
+      promptNewNotebook('create-note')
     },
   })
 }
 
-/**
- * 问 AI（P2-3）：把当前笔记的标题/正文摘要暂存到上下文槽，跳对话页预填。
- *
- * 先 flush()：用户可能刚敲完还没到 600ms 防抖，直接读 store 会带旧正文过去。
- * 摘要去掉 Markdown 标记并压成单行（输入框是单行，换行会被吃掉）。
- */
-function askAi(): void {
-  const note = activeNote.value
-  if (note === null) return
-  flush()
+/* ─────────── 笔记本菜单（长按 chip 或点 ⋯） ─────────── */
+
+function openNotebookMenu(name: string): void {
   haptic('light')
-  const excerpt = draftBody.value
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 160)
-  stashContext({
-    kind: 'note',
-    id: note.id,
-    title: draftTitle.value.trim() === '' ? '未命名笔记' : draftTitle.value,
-    excerpt,
+  openSheet({
+    kind: 'menu',
+    title: `笔记本「${name}」`,
+    items: [
+      { label: '改名', hint: '本内笔记一起换到新名字下' },
+      { label: '删除', hint: '笔记会移到「未分类」，内容不会丢', danger: true },
+    ],
+    onSelect: (index) => {
+      if (index === 0) promptRenameNotebook(name)
+      else confirmRemoveNotebook(name)
+    },
   })
-  uni.navigateTo({ url: '/pages/chat/chat?from=workbench' })
 }
+
+function promptRenameNotebook(from: string): void {
+  openSheet({
+    kind: 'prompt',
+    title: '笔记本改名',
+    message: `「${from}」的新名字：`,
+    value: from,
+    placeholder: '笔记本名称',
+    confirmText: '保存',
+    onConfirm: (text) => {
+      const to = text.trim()
+      if (to === '' || to === from) {
+        toast('名称没有变化')
+        return
+      }
+      if (data.value.notebooks.some((n) => n.name === to)) {
+        toast('已有同名笔记本')
+        return
+      }
+      renameNotebook(from, to)
+      if (filter.value === from) filter.value = to
+      haptic('medium')
+      toast('已改名')
+    },
+  })
+}
+
+function confirmRemoveNotebook(name: string): void {
+  const count = data.value.notes.filter((n) => n.notebook === name).length
+  openSheet({
+    kind: 'confirm',
+    title: `删除笔记本「${name}」？`,
+    message: count > 0
+      ? `本内 ${count} 篇笔记会移到「未分类」，内容不会丢。`
+      : '这个笔记本里还没有笔记。',
+    confirmText: '删除',
+    onConfirm: () => {
+      removeNotebook(name)
+      if (filter.value === name) filter.value = ALL
+      haptic('medium')
+      toast('已删除笔记本')
+    },
+  })
+}
+
+/* ─────────── 生命周期 ─────────── */
 
 function selectFirstForWide(): void {
   try {
@@ -347,34 +315,30 @@ function selectFirstForWide(): void {
     if (info.windowWidth < 820) return
     if (filteredNotes.value.length === 0) return
     const first = filteredNotes.value[0]
-    if (first !== undefined) loadDraft(first)
+    if (first !== undefined && readingId.value === '') readingId.value = first.id
   } catch {
     /* 取不到窗口宽度就按手机处理 */
   }
 }
 
-// 切设备域后当前编辑的笔记可能已不存在；同时把失效的笔记本筛选拉回「全部」
+// 切设备域/同步后当前阅读的笔记可能已不存在；把失效的筛选拉回「全部」
 watch(data, () => {
-  if (editingId.value !== '' && activeNote.value === null) discardEditor()
-  const valid = filter.value === ALL || filter.value === FAV || data.value.notes.some((n) => n.notebook === filter.value)
+  if (readingId.value !== '' && readingNote.value === null) readingId.value = ''
+  const valid = filter.value === ALL
+    || filter.value === FAV
+    || data.value.notebooks.some((n) => n.name === filter.value)
+    || data.value.notes.some((n) => n.notebook === filter.value)
   if (!valid) filter.value = ALL
 })
 
 onMounted(selectFirstForWide)
-
-onUnmounted(() => {
-  flush()
-  if (saveTimer !== undefined) clearTimeout(saveTimer)
-  // 离开页面后不再等设备回写：轮询下一个 tick 就退出（任务本身在设备上继续跑）
-  aiStop = true
-})
 </script>
 
 <template>
   <WorkShell active="notes" title="笔记" :sub="`${data.notes.length} 篇 · 本地存储 · 笔记本 / 标签不丢`">
-    <view class="notes-page" :class="{ 'is-editing': editingId !== '' }">
+    <view class="notes-page" :class="{ 'is-reading': readingId !== '' }">
       <view class="page-head">
-        <text class="head-note">自动保存 · 离线可用 · AI 完善需连接设备（内容只在本机保存）</text>
+        <text class="head-note">点笔记先读 · 右上「编辑」再写 · 自动保存 · 离线可用</text>
         <view class="btn primary head-new" @tap="openCreate">＋ 新建</view>
       </view>
 
@@ -388,15 +352,23 @@ onUnmounted(() => {
             <text>收藏</text>
             <text class="chip-n mono">{{ favCount }}</text>
           </view>
+          <!-- 笔记本 chip：长按（或点 ⋯）出菜单；点本体只做筛选 -->
           <view
-            v-for="nb in notebooks"
+            v-for="nb in notebookRows"
             :key="nb.name"
-            class="chip"
+            class="chip nb"
             :class="{ on: filter === nb.name }"
             @tap="setFilter(nb.name)"
+            @longpress="openNotebookMenu(nb.name)"
           >
             <text>{{ nb.name }}</text>
             <text class="chip-n mono">{{ nb.count }}</text>
+            <view class="chip-more" @tap.stop="openNotebookMenu(nb.name)">
+              <text>⋯</text>
+            </view>
+          </view>
+          <view class="chip add" @tap="promptNewNotebook('only')">
+            <text>＋ 新建笔记本</text>
           </view>
         </view>
       </scroll-view>
@@ -412,7 +384,7 @@ onUnmounted(() => {
             v-for="n in filteredNotes"
             :key="n.id"
             class="note-card"
-            :class="{ on: n.id === editingId }"
+            :class="{ on: n.id === readingId }"
             @tap="openNote(n.id)"
           >
             <view class="nc-top">
@@ -421,7 +393,7 @@ onUnmounted(() => {
                 <text>{{ n.fav ? '★' : '☆' }}</text>
               </view>
             </view>
-            <view class="nc-sum"><text>{{ summary(n) || '空白笔记 · 点开写点什么' }}</text></view>
+            <view class="nc-sum"><text>{{ summary(n) || '空白笔记 · 点开读或写' }}</text></view>
             <view class="nc-meta">
               <text class="nb-tag">{{ n.notebook }}</text>
               <text v-for="tag in n.tags" :key="tag" class="tag">#{{ tag }}</text>
@@ -430,102 +402,61 @@ onUnmounted(() => {
           </view>
         </view>
 
-        <view v-if="activeNote" class="edit-col">
-          <view class="editor">
-            <view class="ed-toolbar">
-              <view class="ed-back" @tap="closeEditor"><text>‹</text></view>
-              <text class="ed-save" :class="saveState">{{ saveLabel }}</text>
+        <!-- 阅读态：标题 + 渲染后的 Markdown；右上「编辑」进整页编辑器 -->
+        <view v-if="readingNote" class="read-col">
+          <view class="reader">
+            <view class="rd-toolbar">
+              <view class="rd-back" @tap="closeReader"><text>‹</text></view>
+              <text class="nb-tag">{{ readingNote.notebook }}</text>
+              <text class="rd-time mono">{{ timeLabel(readingNote.updatedAt) }}</text>
               <view class="sp" />
-              <view class="ed-star" :class="{ on: activeNote.fav }" @tap="toggleFav(activeNote.id)">
-                <text>{{ activeNote.fav ? '★' : '☆' }}</text>
+              <view class="rd-star" :class="{ on: readingNote.fav }" @tap="toggleFav(readingNote.id)">
+                <text>{{ readingNote.fav ? '★' : '☆' }}</text>
               </view>
-              <view class="ed-del" @tap="confirmDelete"><text>删除</text></view>
+              <view class="rd-edit" @tap="openEditor(readingNote.id)"><text>编辑</text></view>
             </view>
 
-            <view class="ed-main">
-              <input
-                v-model="draftTitle"
-                class="ed-title"
-                placeholder="标题…"
-                placeholder-style="color: var(--t3)"
-                :maxlength="-1"
-                @input="scheduleSave"
-              />
-              <view class="ed-metarow">
-                <text class="nb-tag">{{ activeNote.notebook }}</text>
-                <text class="ed-time mono">{{ timeLabel(activeNote.updatedAt) }}</text>
-                <text class="ed-wc mono">{{ wordCount }} 字</text>
+            <scroll-view scroll-y class="rd-body">
+              <view class="rd-inner">
+                <text class="rd-title">{{ readingNote.title || '未命名笔记' }}</text>
+                <view class="rd-meta">
+                  <text v-for="tag in readingNote.tags" :key="tag" class="tag">#{{ tag }}</text>
+                  <text class="rd-wc mono">{{ readingWordCount }} 字</text>
+                </view>
+                <MossMarkdown
+                  v-if="readingNote.content.trim().length > 0"
+                  class="rd-md"
+                  :text="readingNote.content"
+                />
+                <view v-else class="rd-empty">
+                  <text>空白笔记 · 点右上「编辑」写点什么</text>
+                </view>
               </view>
-              <textarea
-                v-model="draftBody"
-                class="ed-body"
-                placeholder="开始写… 支持 Markdown 习惯的纯文本"
-                placeholder-style="color: var(--t3)"
-                :maxlength="-1"
-                :show-confirm-bar="false"
-                @input="scheduleSave"
-                @blur="flush"
-              ></textarea>
-            </view>
-
-            <view class="ed-foot">
-              <view class="btn primary ed-ai" :class="{ busy: aiBusy }" @tap="aiPolish">
-                <text>{{ aiBusy ? '完善中…' : 'AI 完善' }}</text>
-              </view>
-              <view class="btn ed-ai ed-req" :class="{ busy: aiBusy }" @tap="aiPolishWithRequirement">
-                <text>按要求</text>
-              </view>
-              <!-- 次按钮：带这篇笔记的标题/正文摘要进对话页（P2-3） -->
-              <view class="btn ed-ai ed-ctx" @tap="askAi">问 AI</view>
-              <text class="foot-hint">输入后 600ms 自动保存 · 不丢笔记本/标签</text>
-            </view>
-            <view v-if="aiHint !== ''" class="ai-hint" :class="{ bad: aiWarn }">
-              <text>{{ aiHint }}</text>
-            </view>
+            </scroll-view>
           </view>
         </view>
 
-        <view v-else class="edit-placeholder">
+        <view v-else class="read-placeholder">
           <text class="ph-mark">▤</text>
-          <text class="ph-title">选择一篇笔记开始编辑</text>
-          <text class="ph-sub">左侧列表会实时筛选；新建时可选已有或新的笔记本。</text>
+          <text class="ph-title">点开一篇笔记先读</text>
+          <text class="ph-sub">阅读态渲染 Markdown；右上「编辑」进入整页编辑。</text>
         </view>
       </view>
     </view>
 
-    <!-- 新建：选择 / 新建笔记本 -->
-    <view v-if="createOpen" class="mask" @tap="createOpen = false">
-      <view class="create-sheet" @tap.stop>
-        <text class="cs-title">新建笔记</text>
-        <text class="cs-cap">选择笔记本</text>
-        <view class="cs-nbs">
-          <view
-            v-for="nb in pickerNotebooks"
-            :key="nb"
-            class="cs-nb"
-            :class="{ on: newNotebook === nb }"
-            @tap="newNotebook = nb"
-          >
-            <text>{{ nb }}</text>
-          </view>
-          <view class="cs-nb new" :class="{ on: newNotebook === '__new__' }" @tap="newNotebook = '__new__'">
-            <text>＋ 新笔记本</text>
-          </view>
-        </view>
-        <input
-          v-if="newNotebook === '__new__'"
-          v-model="customNotebook"
-          class="cs-input"
-          placeholder="新笔记本名称"
-          placeholder-style="color: var(--t3)"
-          :maxlength="-1"
-        />
-        <view class="cs-actions">
-          <view class="btn" @tap="createOpen = false">取消</view>
-          <view class="btn primary" @tap="createNote">创建并编辑</view>
-        </view>
-      </view>
-    </view>
+    <MossSheet
+      :visible="sheet.visible"
+      :kind="sheet.kind"
+      :title="sheet.title"
+      :message="sheet.message"
+      :items="sheet.items"
+      :value="sheet.value"
+      :placeholder="sheet.placeholder"
+      :confirm-text="sheet.confirmText"
+      @update:visible="sheet.visible = $event"
+      @select="onSheetSelect"
+      @confirm="onSheetConfirm"
+    />
   </WorkShell>
 </template>
 
@@ -579,10 +510,30 @@ onUnmounted(() => {
 }
 .chip-n { font-size: 9.5px; color: var(--t3); }
 .chip.on .chip-n { color: var(--acc); }
+.chip.nb { padding-right: 6px; }
+/* ⋯ 是笔记本菜单的显式入口：长按不直观，右键 H5 才有 */
+.chip-more {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--t3);
+  font-size: 13px;
+  line-height: 1;
+}
+.chip-more:active { background: var(--s3); color: var(--t1); }
+.chip.add {
+  color: var(--t3);
+  border-style: dashed;
+  font-weight: 500;
+}
+.chip.add:active { color: var(--acc); border-color: var(--bd-strong); }
 
 .workspace { display: flex; flex-direction: column; min-width: 0; }
 .list-col { flex: 1; min-width: 0; }
 
+/* ── 卡片：高度完全由内容撑开（不写 height，标题 2 行 / 摘要 3 行截断） ── */
 .note-card {
   position: relative;
   padding: 14px;
@@ -601,13 +552,15 @@ onUnmounted(() => {
 .nc-title {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
   font-size: 13.5px;
   font-weight: 700;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--t1);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .star {
   flex: 0 0 26px;
@@ -623,12 +576,13 @@ onUnmounted(() => {
 .nc-sum {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
   margin-top: 6px;
   font-size: 11.5px;
-  line-height: 1.75;
+  line-height: 1.7;
   color: var(--t3);
+  word-break: break-word;
 }
 .nc-meta {
   display: flex;
@@ -672,9 +626,9 @@ onUnmounted(() => {
 }
 .empty-hint { font-size: 10.5px; color: var(--t3); line-height: 1.7; }
 
-/* ── 编辑器 ── */
-.edit-col { display: none; }
-.editor {
+/* ── 阅读态 ── */
+.read-col { display: none; }
+.reader {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -684,7 +638,7 @@ onUnmounted(() => {
   border-radius: var(--r-lg);
   overflow: hidden;
 }
-.ed-toolbar {
+.rd-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -692,7 +646,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--bd);
   background: color-mix(in srgb, var(--s2) 60%, transparent);
 }
-.ed-back {
+.rd-back {
   width: 30px;
   height: 30px;
   flex: 0 0 30px;
@@ -705,15 +659,9 @@ onUnmounted(() => {
   font-size: 18px;
   line-height: 1;
 }
-.ed-save {
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--t3);
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-}
-.ed-save.dirty { color: var(--warn); }
-.sp { flex: 1; }
-.ed-star {
+.rd-time { font-size: 10px; color: var(--t3); }
+.sp { flex: 1; min-width: 0; }
+.rd-star {
   width: 30px;
   height: 30px;
   flex: 0 0 30px;
@@ -723,111 +671,63 @@ onUnmounted(() => {
   color: var(--t3);
   font-size: 14px;
 }
-.ed-star.on { color: var(--warn); }
-.ed-del {
+.rd-star.on { color: var(--warn); }
+.rd-edit {
   height: 30px;
-  padding: 0 10px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   border-radius: 9px;
-  border: 1px solid var(--danger-bd);
-  color: var(--danger);
-  font-size: 10.5px;
-  background: var(--danger-soft);
-}
-.ed-main {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 12px 16px 0;
-}
-.ed-title {
-  width: 100%;
-  height: 40px;
-  padding: 0 0 8px;
-  border: 0;
-  border-bottom: 1px solid var(--bd);
-  background: transparent;
-  color: var(--t1);
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: -0.2px;
-}
-.ed-metarow {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 9px 0 6px;
-}
-.ed-time,
-.ed-wc { font-size: 10px; color: var(--t3); }
-.ed-wc { margin-left: auto; }
-.ed-body {
-  flex: 1;
-  width: 100%;
-  min-height: 220px;
-  padding: 10px 0 16px;
-  border: 0;
-  background: transparent;
-  color: var(--t1);
-  font-size: 13.5px;
-  line-height: 1.95;
-}
-.ed-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--bd);
-  background: var(--s2);
-}
-.ed-ai {
-  flex: 0 0 auto;
-  width: auto;
-  min-height: 38px;
-  height: 38px;
-  padding: 0 16px;
-  font-size: 12.5px;
-}
-.ed-ai.busy {
-  opacity: 0.6;
-  pointer-events: none;
-}
-/* 「按要求完善」：比主按钮轻一档，但保持 38px 触控高度 */
-.ed-req {
-  padding: 0 12px;
-  font-size: 11.5px;
-  color: var(--t2);
-}
-/* 次按钮：浅色卡片 + 强调色文字，和 WorkShell 的浅色卡片观感一致 */
-.ed-ctx {
-  padding: 0 14px;
-  color: var(--acc);
-  border-color: var(--bd-strong);
+  border: 1px solid var(--bd-strong);
   background: var(--acc-soft);
+  color: var(--acc);
+  font-size: 11.5px;
+  font-weight: 600;
 }
-.foot-hint {
-  flex: 1;
-  min-width: 0;
-  font-size: 9.5px;
-  line-height: 1.5;
-  color: var(--t3);
-  text-align: right;
-}
-/* 常驻状态行：成功/等待/降级都写在这里，不依赖一闪而过的 toast */
-.ai-hint {
-  padding: 8px 14px;
-  border-top: 1px solid var(--bd);
-  background: var(--s1);
-  font-size: 10px;
-  line-height: 1.6;
-  color: var(--t3);
-}
-.ai-hint.bad { color: var(--warn); }
+.rd-edit:active { opacity: 0.75; }
 
-.edit-placeholder {
+.rd-body {
+  flex: 1;
+  height: 0;
+  min-height: 0;
+}
+.rd-inner {
+  padding: 16px 16px 26px;
+  max-width: 780px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.rd-title {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.2px;
+  color: var(--t1);
+  word-break: break-word;
+}
+.rd-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 9px 0 14px;
+}
+.rd-wc {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--t3);
+}
+.rd-md { display: block; }
+.rd-empty {
+  padding: 26px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--t3);
+  text-align: center;
+}
+
+.read-placeholder {
   display: none;
   flex-direction: column;
   align-items: center;
@@ -843,76 +743,12 @@ onUnmounted(() => {
 .ph-title { font-size: 13px; font-weight: 600; color: var(--t2); }
 .ph-sub { font-size: 10.5px; line-height: 1.7; text-align: center; padding: 0 24px; }
 
-/* 选笔记本浮层 */
-.mask {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background: color-mix(in srgb, var(--bg) 76%, transparent);
-}
-.create-sheet {
-  width: 100%;
-  max-width: 440px;
-  padding: 18px;
-  border-radius: var(--r-lg);
-  background: var(--s1);
-  border: 1px solid var(--bd);
-}
-.cs-title {
-  display: block;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--t1);
-}
-.cs-cap {
-  display: block;
-  margin-top: 14px;
-  margin-bottom: 8px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--t3);
-}
-.cs-nbs { display: flex; flex-wrap: wrap; gap: 8px; }
-.cs-nb {
-  height: 34px;
-  padding: 0 13px;
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--bd);
-  background: var(--s2);
-  color: var(--t2);
-  font-size: 12px;
-}
-.cs-nb.on {
-  border-color: var(--bd-strong);
-  background: var(--acc-soft);
-  color: var(--acc);
-}
-.cs-nb.new { border-style: dashed; }
-.cs-input {
-  width: 100%;
-  height: 42px;
-  margin-top: 10px;
-  padding: 0 12px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--bd);
-  background: var(--s2);
-  color: var(--t1);
-  font-size: 13px;
-}
-.cs-actions { display: flex; gap: 10px; margin-top: 18px; }
-
-/* ── 手机：编辑器全屏 ── */
+/* ── 手机：阅读态全屏 ── */
 @media (max-width: 819px) {
-  .notes-page.is-editing .page-head,
-  .notes-page.is-editing .chips,
-  .notes-page.is-editing .list-col { display: none; }
-  .notes-page.is-editing .edit-col {
+  .notes-page.is-reading .page-head,
+  .notes-page.is-reading .chips,
+  .notes-page.is-reading .list-col { display: none; }
+  .notes-page.is-reading .read-col {
     display: flex;
     position: fixed;
     inset: 0;
@@ -921,25 +757,15 @@ onUnmounted(() => {
     background: var(--bg);
     padding-top: var(--safe-top-real, 24px);
   }
-  .notes-page.is-editing .edit-col .editor {
+  .notes-page.is-reading .read-col .reader {
     border: 0;
     border-radius: 0;
     height: 100%;
   }
-  .notes-page.is-editing .ed-main { padding-bottom: 8px; }
-  .notes-page.is-editing .ed-body { min-height: 160px; }
-  .notes-page.is-editing .ed-foot {
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
-    flex-wrap: wrap;
-  }
-  /* 三个按钮 + 提示在 375px 上放不下一行：提示单独占一行，按钮保持 38px */
-  .notes-page.is-editing .foot-hint {
-    flex: 1 1 100%;
-    text-align: left;
-  }
+  .notes-page.is-reading .rd-inner { padding-bottom: calc(24px + var(--safe-bottom-real)); }
 }
 
-/* ── 平板 / 桌面：左右两栏 ── */
+/* ── 平板 / 桌面：左列表 + 右阅读 ── */
 @media (min-width: 820px) {
   .workspace {
     flex-direction: row;
@@ -950,19 +776,19 @@ onUnmounted(() => {
     flex: 0 0 336px;
     width: 336px;
   }
-  .edit-col {
+  .read-col {
     display: flex;
     flex: 1;
     min-width: 0;
   }
-  .editor {
-    /* 减去顶栏 + 设备 chips + 页头 + 底栏：让 AI 完善那一行停在 Tab 上方 */
+  .reader {
+    /* 减去顶栏 + 设备 chips + 页头 + 底栏：让阅读区停在 Tab 上方 */
     height: calc(100vh - 302px);
     min-height: 380px;
     max-height: 760px;
   }
-  .ed-back { display: none; }
-  .edit-placeholder { display: flex; }
+  .rd-back { display: none; }
+  .read-placeholder { display: flex; }
   .head-new { height: 34px; min-height: 34px; }
 }
 </style>

@@ -8,20 +8,29 @@
  *
  * 数据只读 @/core/workbench 的 DomainData；改期 / 改状态在共用详情抽屉里完成。
  *
- * 移动手势（P0-3，手机没有鼠标拖拽，用"长按 → 落点"替代）：
- *   - 长按任务条进入移动模式，顶部出现提示条，再点日期格 / 日头把 `date` 改过去，
- *     `when` 里的时间原样保留；取消只退出，不动数据。
- *   - 点周视图小时格 = 以那天那小时新建；点月视图空白格 = 以那天新建（全天）。
- * 全程不依赖坐标计算，落点由被点中的元素决定，跨端表现一致。
+ * 手势（P0-4）：
+ *   1. 长按任务条 → 弹出操作菜单（移动 / 改期 · 编辑 · 删除 · 取消）。
+ *      菜单用共用 MossSheet（页内自绘），不用 uni.showActionSheet：
+ *      原生弹层与应用视觉两张皮，且部分平台最多只显示 6 项。
+ *   2. 选「移动 / 改期」进入移动模式：
+ *      - 拖动：按住色块随手指走，一个 fixed 幽灵条跟手，落点按列宽 / 行高算，
+ *        松手 `updateTask(id, { date, when })`（when 取整点）。
+ *      - 兜底：点日期格 / 日头只改 `date`（时间原样），桌面鼠标也能验收。
+ *   3. 删除：二次确认后 `removeTask`，网格与安排列表即时消失。
+ *
+ * 坐标只用来"猜落点"：列宽从 createSelectorQuery 量（滚动不影响宽度），
+ * 高度用与 CSS 严格一致的 HOUR_H 等分；两者都失败时退回点格子，不会写错日期。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
+import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import {
   WEEKDAYS,
   addTask,
   isoDay,
+  removeTask,
   updateTask,
   useWork,
   work,
@@ -30,6 +39,12 @@ import {
 import { haptic } from '@/core/haptic'
 
 const { data } = useWork()
+
+/**
+ * 页面实例要在这里先抓住：getCurrentInstance() 只在 setup / 生命周期里有值，
+ * 事件回调里再取都是 null（那样查询会落到根节点，量不到列宽）。
+ */
+const pageInst = getCurrentInstance()
 
 const TODAY = isoDay()
 const HOUR_FROM = 8
@@ -115,7 +130,7 @@ const nowTick = ref(new Date())
 /** 手机上 7 天放不进一屏：进页面先把选中那天滚进视野，否则用户看到的是空白的周一。 */
 const weekScrollLeft = ref(0)
 
-/* ── 移动模式 / 新建高亮（P0-3） ─────────────────────────────────── */
+/* ── 移动模式 / 新建高亮 / 长按菜单（P0-4） ───────────────────────── */
 
 /** 正在被"移动"的任务 id；空串 = 不在移动模式。 */
 const movingId = ref('')
@@ -126,10 +141,36 @@ const FLASH_MS = 1600
 const HOLD_MS = 450
 let flashTimer: ReturnType<typeof setTimeout> | undefined
 
+/** 长按任务条弹出的操作菜单（MossSheet 的 menu 形态）。 */
+const menuOpen = ref(false)
+const menuId = ref('')
+/** 删除二次确认（MossSheet 的 confirm 形态）。 */
+const deleteOpen = ref(false)
+const deleteId = ref('')
+
 /** 提示条里的任务名：长标题截断，宁可省略也别把提示条撑成三行（它会压到日头）。 */
 const movingTitle = computed(() => {
   const title = data.value.tasks.find((t) => t.id === movingId.value)?.title ?? ''
   return title.length > 12 ? `${title.slice(0, 12)}…` : title
+})
+
+function shortTitle(id: string, max: number): string {
+  const title = data.value.tasks.find((t) => t.id === id)?.title ?? ''
+  return title.length > max ? `${title.slice(0, max)}…` : title
+}
+
+const menuTitle = computed(() => (menuId.value === '' ? '' : `《${shortTitle(menuId.value, 16)}》`))
+
+/** 菜单项固定四项；「取消」由 MossSheet 底部取消条提供，不占选项位。 */
+const MENU_ITEMS: readonly SheetItem[] = [
+  { label: '移动 / 改期', hint: '进入移动模式：按住色块拖到别的日 / 时，或点日期格落下' },
+  { label: '编辑', hint: '打开任务详情，改标题、备注、状态与优先级' },
+  { label: '删除', hint: '从日历与安排列表移除，同步到其它端（不可恢复）', danger: true },
+]
+
+const deleteMessage = computed(() => {
+  const title = shortTitle(deleteId.value, 16)
+  return `「${title}」删除后不可恢复，日历网格与下方安排列表里会立即消失。`
 })
 
 watch(
@@ -137,6 +178,11 @@ watch(
   () => {
     detailOpen.value = false
     movingId.value = ''
+    menuOpen.value = false
+    menuId.value = ''
+    deleteOpen.value = false
+    deleteId.value = ''
+    resetDrag()
   },
 )
 
@@ -359,6 +405,8 @@ function focusSelectedDay(): void {
 
 function setCalView(v: 'week' | 'month'): void {
   if (calView.value === v) return
+  // 周网格要拆掉了：拖到一半的幽灵条必须一起收掉，否则它留在屏幕上成了孤儿
+  cancelDrag()
   calView.value = v
   haptic('light')
 }
@@ -396,21 +444,42 @@ function pickMonthDay(iso: string): void {
 }
 
 function openTask(id: string): void {
-  // 长按 / 按住之后，平台多半还会补一次 tap：吃掉它，否则刚进移动模式就被详情盖住。
-  if (swallowUntil > Date.now() && id === movingId.value) {
+  // 长按 / 按住之后平台多半还会补一次 tap：吃掉它，否则菜单刚弹出就被详情盖住。
+  if (isSwallowedTap(id)) {
+    swallowId = ''
     swallowUntil = 0
     return
   }
+  openDetail(id)
+}
+
+/** 打开共用详情抽屉。菜单里的「编辑」也走这里（绕开吞点击逻辑，否则会被自己吃掉）。 */
+function openDetail(id: string): void {
+  cancelDrag()
   movingId.value = ''
   detailId.value = id
   detailOpen.value = true
   haptic('light')
 }
 
-/* ── 移动模式：长按任务条 → 点日期落点 ─────────────────────────────── */
+/* ── 长按菜单（ActionSheet 风格，MossSheet 页内自绘，跨端一致） ───────── */
 
-/** 长按后补发的那次 tap 的"吃掉"截止时间（只影响被移动的那条任务）。 */
+/**
+ * 长按 / 按住后的"吃掉"窗口：只针对刚被长按的那一条任务。
+ * 平台在抬手时会补发一次 tap（H5 是 click），不吞掉就会立刻打开详情、把菜单顶掉。
+ */
+let swallowId = ''
 let swallowUntil = 0
+
+function swallowTap(id: string, ms: number): void {
+  swallowId = id
+  swallowUntil = Date.now() + ms
+}
+
+function isSwallowedTap(id: string): boolean {
+  return id === swallowId && Date.now() < swallowUntil
+}
+
 /** 桌面浏览器没有长按手势（uni-h5 的 longpress 只挂在触摸事件上），补一个按住等价入口。 */
 let holdTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -424,7 +493,7 @@ function holdStart(id: string): void {
   clearHold()
   holdTimer = setTimeout(() => {
     holdTimer = undefined
-    startMove(id)
+    openMenu(id)
   }, HOLD_MS)
 }
 
@@ -437,15 +506,350 @@ function onBarRelease(): void {
   if (swallowUntil > Date.now()) swallowUntil = Date.now() + 400
 }
 
+function openMenu(id: string): void {
+  // 拖动中 / 已经在移动这一条时，长按不再叠一层菜单
+  if (drag.value !== null) return
+  if (movingId.value === id) return
+  clearHold()
+  swallowTap(id, 1200)
+  menuId.value = id
+  menuOpen.value = true
+  haptic('medium')
+}
+
+function onMenuSelect(index: number): void {
+  const id = menuId.value
+  menuOpen.value = false
+  menuId.value = ''
+  if (id === '') return
+  if (data.value.tasks.find((t) => t.id === id) === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  if (index === 0) {
+    startMove(id)
+    return
+  }
+  if (index === 1) {
+    openDetail(id)
+    return
+  }
+  if (index === 2) askDelete(id)
+}
+
+/* ── 删除（二次确认 → removeTask） ─────────────────────────────────── */
+
+function askDelete(id: string): void {
+  if (data.value.tasks.find((t) => t.id === id) === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  deleteId.value = id
+  deleteOpen.value = true
+  haptic('light')
+}
+
+function doDelete(): void {
+  const id = deleteId.value
+  deleteOpen.value = false
+  deleteId.value = ''
+  if (id === '') return
+  const task = data.value.tasks.find((t) => t.id === id)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  // 先把"引用这条任务"的浮层全部收掉，再删；否则详情抽屉会停在一条已不存在的任务上
+  if (movingId.value === id) movingId.value = ''
+  if (detailId.value === id) detailOpen.value = false
+  cancelDrag()
+  removeTask(id)
+  haptic('medium')
+  toast('已删除')
+}
+
+/* ── 移动模式：拖动排期（手势） + 点格子（兜底） ───────────────────── */
+
+interface DragState {
+  id: string
+  title: string
+  tone: Tone
+  /** 幽灵条尺寸（px）与手指抓取偏移（相对幽灵条顶部） */
+  width: number
+  height: number
+  grab: number
+  startX: number
+  startY: number
+  /** 幽灵条左上角（视口坐标，position: fixed） */
+  x: number
+  y: number
+  /** 起点列与起点色块顶部（px，相对网格顶部）——落点由位移推出来 */
+  startIso: string
+  startCol: number
+  baseTop: number
+  targetIso: string
+  targetHour: number
+  moved: boolean
+  pointer: 'touch' | 'mouse'
+}
+
+const drag = ref<DragState | null>(null)
+/** 手指移动超过这个距离才算"拖动"，否则还是当作一次点击。 */
+const DRAG_SLOP = 6
+/** 实测列宽（px）。滚动不影响宽度，所以只量一次就够。 */
+let colWidth = 96
+let measuring = false
+
+const dragIso = computed(() => (drag.value === null || !drag.value.moved ? '' : drag.value.targetIso))
+const dragHour = computed(() => (drag.value === null || !drag.value.moved ? -1 : drag.value.targetHour))
+
+const dragLabel = computed(() => {
+  const d = drag.value
+  if (d === null) return ''
+  return `${md(d.targetIso)} ${pad(d.targetHour)}:00`
+})
+
+/** 提示条上的一句话：拖动中报落点，未拖时报"还能怎么落"。 */
+const moveHint = computed(() => {
+  const d = drag.value
+  if (d !== null && d.moved) return `松手落到 ${md(d.targetIso)} ${pad(d.targetHour)}:00`
+  return calView.value === 'week'
+    ? '按住色块拖动 · 或点日期格 / 日头落下'
+    : '点任意日期把任务移过去'
+})
+
+const ghostStyle = computed(() => {
+  const d = drag.value
+  if (d === null) return ''
+  return `left:${Math.round(d.x)}px;top:${Math.round(d.y)}px;width:${d.width}px;height:${d.height}px`
+})
+
+/**
+ * 量 7 天列宽。H5 的 boundingClientRect 会把 top 减掉 window-top（安全区），
+ * 所以这里**只用 width**：列宽在横向滚动下不变，落点用"起点列 + 位移/列宽"推，
+ * 既不受滚动影响，也不受坐标系差异影响。
+ */
+function measureColumns(): void {
+  if (measuring) return
+  measuring = true
+  const query = uni.createSelectorQuery()
+  if (pageInst !== null) query.in(pageInst.proxy ?? pageInst)
+  query.selectAll('.daycol').boundingClientRect()
+  query.exec((res: any) => {
+    measuring = false
+    const list: any[] | null = Array.isArray(res) ? res[0] : null
+    if (list === null || list.length === 0) return
+    let sum = 0
+    let n = 0
+    for (const r of list) {
+      const w = Number(r?.width ?? 0)
+      if (Number.isFinite(w) && w > 20) {
+        sum += w
+        n += 1
+      }
+    }
+    if (n > 0) colWidth = sum / n
+  })
+}
+
+function pointOf(e: any): { x: number; y: number } | null {
+  const t = e?.touches?.[0] ?? e?.changedTouches?.[0]
+  if (t !== undefined && t !== null && Number.isFinite(Number(t.clientX))) {
+    return { x: Number(t.clientX), y: Number(t.clientY) }
+  }
+  if (Number.isFinite(Number(e?.clientX)) && Number.isFinite(Number(e?.clientY))) {
+    return { x: Number(e.clientX), y: Number(e.clientY) }
+  }
+  return null
+}
+
+function clampInt(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v))
+}
+
+function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number, pointer: 'touch' | 'mouse'): void {
+  if (movingId.value !== id) return
+  const startCol = weekDays.value.findIndex((d) => d.iso === iso)
+  if (startCol < 0) return
+  const width = Math.max(64, Math.round(colWidth - 6))
+  const height = Math.max(26, ev.height)
+  // 抓取点固定在手指下方一点点：幽灵条不会整块跳到指尖，也不会遮住落点
+  const grab = Math.min(height - 6, Math.max(10, Math.round(height / 2)))
+  drag.value = {
+    id,
+    title: ev.title,
+    tone: ev.tone,
+    width,
+    height,
+    grab,
+    startX: x,
+    startY: y,
+    x: x - width / 2,
+    y: y - grab,
+    startIso: iso,
+    startCol,
+    baseTop: ev.top,
+    targetIso: iso,
+    targetHour: clampInt(HOUR_FROM + Math.floor(ev.top / HOUR_H), HOUR_FROM, HOUR_TO - 1),
+    moved: false,
+    pointer,
+  }
+  haptic('medium')
+}
+
+function moveDrag(x: number, y: number): void {
+  const d = drag.value
+  if (d === null) return
+  const dx = x - d.startX
+  const dy = y - d.startY
+  if (!d.moved && Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return
+  d.moved = true
+  d.x = x - d.width / 2
+  d.y = y - d.grab
+  const step = Math.round(dx / colWidth)
+  const col = clampInt(d.startCol + step, 0, weekDays.value.length - 1)
+  const iso = weekDays.value[col]?.iso ?? d.startIso
+  // 小时：起点色块 top + 竖向位移，落在第几个 46px 格子里就是几点
+  const hour = clampInt(HOUR_FROM + Math.floor((d.baseTop + dy) / HOUR_H), HOUR_FROM, HOUR_TO - 1)
+  d.targetIso = iso
+  d.targetHour = hour
+}
+
+/** 松手：commit=false 用于取消（切视图 / 删任务 / touchcancel）。 */
+function endDrag(commit: boolean): void {
+  detachMouse()
+  const d = drag.value
+  drag.value = null
+  if (d === null) return
+  if (!commit || !d.moved) return
+  const task = data.value.tasks.find((t) => t.id === d.id)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  const when = `${pad(d.targetHour)}:00`
+  const iso = d.targetIso
+  movingId.value = ''
+  swallowTap(d.id, 600)
+  if (task.date === iso && task.when === when) {
+    toast('位置没变')
+    return
+  }
+  updateTask(d.id, { date: iso, when })
+  flashFor(d.id, iso)
+  // 周视图把选中日跟过去：任务同时出现在下方安排列表里，改期结果一眼可见
+  anchor.value = iso
+  haptic('light')
+  toast(`已移到 ${md(iso)} · ${when}`)
+}
+
+function cancelDrag(): void {
+  if (drag.value === null) {
+    detachMouse()
+    return
+  }
+  drag.value = null
+  detachMouse()
+}
+
+function resetDrag(): void {
+  drag.value = null
+  detachMouse()
+}
+
+/* ── 拖动入口（触摸 / 鼠标共用同一套 moveDrag / endDrag） ───────────── */
+
+/** 触摸起点：已经在移动这条 → 直接开拖；否则顺手量一次列宽，进移动模式后立刻可用。 */
+function barTouchStart(id: string, iso: string, ev: CalEvent, e: any): void {
+  const p = pointOf(e)
+  if (p === null) return
+  if (movingId.value === id) {
+    clearHold()
+    if (drag.value !== null) return
+    startDrag(id, iso, ev, p.x, p.y, 'touch')
+    return
+  }
+  measureColumns()
+}
+
+function barTouchMove(e: any): void {
+  clearHold()
+  const d = drag.value
+  if (d === null) return
+  const p = pointOf(e)
+  if (p === null) return
+  // 拖动期间阻止页面 / 网格跟着滚：否则幽灵条的参照系在动，落点会跳
+  const pe = e as { preventDefault?: () => void; cancelable?: boolean }
+  if (typeof pe.preventDefault === 'function' && pe.cancelable !== false) pe.preventDefault()
+  moveDrag(p.x, p.y)
+}
+
+function barTouchEnd(e?: any): void {
+  if (drag.value !== null) {
+    // 以抬手那一点的坐标收尾（最后一次 touchmove 可能比手指落后一帧）
+    const p = e === undefined ? null : pointOf(e)
+    if (p !== null) moveDrag(p.x, p.y)
+    endDrag(true)
+    return
+  }
+  onBarRelease()
+}
+
+function barTouchCancel(): void {
+  if (drag.value !== null) {
+    endDrag(false)
+    return
+  }
+  clearHold()
+}
+
+function barMouseDown(id: string, iso: string, ev: CalEvent, e: any): void {
+  const p = pointOf(e)
+  if (p === null) return
+  if (movingId.value === id) {
+    if (drag.value !== null) return
+    startDrag(id, iso, ev, p.x, p.y, 'mouse')
+    attachMouse()
+    return
+  }
+  holdStart(id)
+}
+
+/* 鼠标拖到网格外也要跟手：监听挂在 document 上，松手即摘。 */
+function onDocMouseMove(e: MouseEvent): void {
+  if (drag.value === null) return
+  if (e.cancelable) e.preventDefault()
+  moveDrag(e.clientX, e.clientY)
+}
+
+function onDocMouseUp(): void {
+  if (drag.value !== null) endDrag(true)
+}
+
+function attachMouse(): void {
+  if (typeof document === 'undefined') return
+  document.addEventListener('mousemove', onDocMouseMove)
+  document.addEventListener('mouseup', onDocMouseUp)
+}
+
+function detachMouse(): void {
+  if (typeof document === 'undefined') return
+  document.removeEventListener('mousemove', onDocMouseMove)
+  document.removeEventListener('mouseup', onDocMouseUp)
+}
+
 function startMove(id: string): void {
   if (movingId.value === id) return
   movingId.value = id
-  swallowUntil = Date.now() + 4000
+  swallowTap(id, 4000)
   haptic('medium')
+  // 提前量一次列宽：拖动那一刻就不用等异步查询回来
+  if (calView.value === 'week') nextTick(() => measureColumns())
 }
 
 function cancelMove(): void {
   if (movingId.value === '') return
+  cancelDrag()
   movingId.value = ''
   haptic('light')
   toast('已取消移动')
@@ -469,7 +873,9 @@ function flashFor(id: string, iso: string): void {
 function moveTo(iso: string): void {
   const id = movingId.value
   if (id === '') return
+  cancelDrag()
   movingId.value = ''
+  swallowTap(id, 400)
   const task = data.value.tasks.find((t) => t.id === id)
   if (task === undefined) {
     toast('这条任务已经不在了')
@@ -568,6 +974,7 @@ onUnmounted(() => {
   if (timer !== undefined) clearInterval(timer)
   if (flashTimer !== undefined) clearTimeout(flashTimer)
   clearHold()
+  detachMouse()
 })
 
 onShow(() => {
@@ -582,7 +989,7 @@ watch(calView, (v) => {
 
 <template>
   <WorkShell active="calendar" title="日历" :sub="calView === 'week' ? '周视图 · 本地存储' : '月视图 · 本地存储'">
-    <view class="cal" :class="{ moving: movingId !== '' }">
+    <view class="cal" :class="{ moving: movingId !== '', dragging: drag !== null }">
       <!-- 移动提示条：0 高 sticky 容器 + 绝对定位，正好压在被临时隐去的工具条位置上，
            既不挤动网格，也不挡日头 / 日期格这些落点。
            挤动布局是不行的：长按之后平台还会补发一次 tap，一旦内容位移，
@@ -590,7 +997,7 @@ watch(calView, (v) => {
       <view v-if="movingId !== ''" class="movewrap">
         <view class="movebar">
           <view class="mv-dot" />
-          <text class="mv-txt">正在移动《{{ movingTitle }}》· 点日期格或日头落下 · 点取消退出</text>
+          <text class="mv-txt">正在移动《{{ movingTitle }}》· {{ moveHint }}</text>
           <view class="mv-cancel" @tap.stop="cancelMove"><text>取消</text></view>
         </view>
       </view>
@@ -639,29 +1046,38 @@ watch(calView, (v) => {
                 v-for="d in weekDays"
                 :key="d.iso"
                 class="daycol"
-                :class="{ today: d.isToday }"
+                :class="{ today: d.isToday, drop: dragIso === d.iso }"
                 @tap="tapDate(d.iso)"
               >
                 <view
                   v-for="h in HOURS"
                   :key="h"
                   class="slot"
+                  :class="{ drop: dragIso === d.iso && dragHour === h }"
                   @tap.stop="slotTap(d.iso, h)"
                 />
 
+                <!-- 长按 = 操作菜单；移动模式下按住 = 拖动（触摸与鼠标共用一套落点计算） -->
                 <view
                   v-for="ev in d.events"
                   :key="ev.id"
                   class="evbar"
-                  :class="[ev.tone, { done: ev.done, moving: ev.id === movingId, flash: ev.id === flashTaskId }]"
+                  :class="[ev.tone, {
+                    done: ev.done,
+                    moving: ev.id === movingId,
+                    flash: ev.id === flashTaskId,
+                    dragging: drag !== null && drag.id === ev.id,
+                  }]"
                   :style="evStyle(ev)"
                   @tap.stop="openTask(ev.id)"
-                  @longpress="startMove(ev.id)"
-                  @mousedown="holdStart(ev.id)"
+                  @longpress="openMenu(ev.id)"
+                  @touchstart="barTouchStart(ev.id, d.iso, ev, $event)"
+                  @touchmove="barTouchMove($event)"
+                  @touchend="barTouchEnd($event)"
+                  @touchcancel="barTouchCancel()"
+                  @mousedown="barMouseDown(ev.id, d.iso, ev, $event)"
                   @mouseup="onBarRelease"
                   @mouseleave="clearHold"
-                  @touchmove="clearHold"
-                  @touchend="onBarRelease"
                 >
                   <text class="et">{{ ev.title }}</text>
                   <text class="eh mono">{{ ev.range }}</text>
@@ -739,10 +1155,38 @@ watch(calView, (v) => {
           <view class="aadd" @tap="quickAdd"><text class="aadd-g">＋</text></view>
         </view>
       </view>
+
+      <!-- 拖动中的幽灵条：fixed 跟手，pointer-events: none 保证它不抢落点的手势 -->
+      <view v-if="drag !== null" class="ghost" :class="drag.tone" :style="ghostStyle">
+        <text class="ghost-t">{{ drag.title }}</text>
+        <text class="ghost-h mono">{{ dragLabel }}</text>
+      </view>
     </view>
 
     <!-- 共用任务详情 -->
     <WorkTaskDetail :visible="detailOpen" :task-id="detailId" @close="detailOpen = false" />
+
+    <!-- 长按操作菜单（ActionSheet 风格；「取消」是它自带的底部取消条） -->
+    <MossSheet
+      :visible="menuOpen"
+      kind="menu"
+      :title="menuTitle"
+      :items="MENU_ITEMS"
+      @update:visible="menuOpen = $event"
+      @select="onMenuSelect"
+    />
+
+    <!-- 删除二次确认 -->
+    <MossSheet
+      :visible="deleteOpen"
+      kind="confirm"
+      title="删除这条任务？"
+      :message="deleteMessage"
+      confirm-text="删除"
+      cancel-text="取消"
+      @update:visible="deleteOpen = $event"
+      @confirm="doDelete"
+    />
   </WorkShell>
 </template>
 
@@ -1012,6 +1456,12 @@ watch(calView, (v) => {
   box-shadow: 0 0 0 1.5px var(--acc), 0 6px 14px var(--acc-soft);
 }
 
+/* 拖动中的原位残留：幽灵条在手上，原位只留一个淡淡的印子 */
+.evbar.dragging {
+  opacity: 0.22;
+  box-shadow: none;
+}
+
 /* 刚新建 / 刚搬过来的那条：闪两下，告诉用户"就在这儿" */
 .evbar.flash { animation: ev-flash 700ms var(--ease-out) 2; }
 
@@ -1175,6 +1625,65 @@ watch(calView, (v) => {
 
 .cal.moving .slot:active,
 .cal.moving .mcell:active { background: var(--s3); }
+
+/* 拖动时的落点：整列提亮 + 目标小时格描边，松手就落在这里 */
+.cal.moving .daycol.drop {
+  background: color-mix(in srgb, var(--acc-soft) 80%, transparent);
+}
+
+.slot.drop {
+  background: color-mix(in srgb, var(--acc) 20%, transparent);
+  box-shadow: inset 0 0 0 1px var(--acc);
+}
+
+/* 移动模式按住就能拖；拖动中禁止选中文字，否则桌面端会拖出一片蓝 */
+.cal.moving .evbar {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cal.dragging .evbar { cursor: grabbing; }
+.cal.dragging { user-select: none; -webkit-user-select: none; }
+
+/* ── 拖动幽灵条（fixed 跟手） ───────────────────────────────────── */
+
+.ghost {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border-left: 3px solid var(--ev, var(--acc));
+  background: color-mix(in srgb, var(--ev, var(--acc)) 24%, var(--s1));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42), 0 0 0 1.5px var(--acc);
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.96;
+}
+
+.ghost.high { --ev: var(--danger); }
+.ghost.normal { --ev: var(--acc); }
+.ghost.low { --ev: var(--t3); }
+
+.ghost-t {
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghost-h {
+  font-size: 8px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+}
 
 /* ── 安排列表 ───────────────────────────────────────────────────── */
 

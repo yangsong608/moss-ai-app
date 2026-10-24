@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue'
 import {
   deviceName,
   isoDay,
+  removeTask,
   toggleSub,
   toggleTask,
   uid,
@@ -48,6 +49,8 @@ const todayIso = isoDay()
 const titleDraft = ref('')
 const noteDraft = ref('')
 const subDraft = ref('')
+/** 删除的二次确认：抽屉内弹一层，避免手滑把任务删掉。 */
+const deleteOpen = ref(false)
 /** 同快速记录：@confirm 与最后一击 input 的先后顺序不可靠，用 key 重建输入框清空更稳。 */
 const subKey = ref(0)
 
@@ -55,6 +58,7 @@ const subKey = ref(0)
 watch(
   () => [props.visible, props.taskId] as const,
   ([vis]) => {
+    deleteOpen.value = false
     if (!vis) return
     titleDraft.value = t.value.title
     noteDraft.value = t.value.note
@@ -216,6 +220,31 @@ function onToggleDone(): void {
   toggleTask(props.taskId)
   haptic('medium')
   toast(t.value.done ? '已完成 · 待同步到 DSH' : '已恢复为未完成')
+}
+
+/* ── 删除（二次确认） ─────────────────────────────────────────────── */
+
+function askDelete(): void {
+  if (!alive.value) return
+  deleteOpen.value = true
+  haptic('light')
+}
+
+function cancelDelete(): void {
+  deleteOpen.value = false
+}
+
+/**
+ * 删除不是"完成"：任务会从当前域移除并打 tombstone 传播到其它端。
+ * 删完立刻关抽屉——留着会短暂显示"这条任务已不在当前设备域"，像出错了。
+ */
+function confirmDelete(): void {
+  if (!alive.value) return
+  removeTask(props.taskId)
+  deleteOpen.value = false
+  haptic('heavy')
+  toast('已删除任务 · 待同步到其他端')
+  close()
 }
 
 function aiSplit(): void {
@@ -383,9 +412,26 @@ function askAi(): void {
             <view class="abtn ctx" @tap="askAi"><text>问 AI</text></view>
             <view class="abtn" @tap="onToggleDone"><text>{{ t.done ? '恢复未完成' : '标记完成' }}</text></view>
           </view>
+          <view class="actions del-actions">
+            <view class="abtn danger" @tap="askDelete"><text>删除任务</text></view>
+          </view>
           <text class="ai-desc">「让 AI 拆解」会把任务拆成可执行子步骤并回写本机；「问 AI」带着这条任务的标题与备注进入对话页，不会自动发送。</text>
         </view>
       </scroll-view>
+    </view>
+  </view>
+
+  <!-- 删除任务：二次确认（独立于抽屉层级，避免被滚动区裁掉） -->
+  <view v-if="props.visible && deleteOpen" class="cmask" @tap="cancelDelete">
+    <view class="cmodal" @tap.stop>
+      <text class="cmh">删除「{{ t.title }}」？</text>
+      <text class="cmb">
+        会从「{{ deviceName() }}」数据域移除这条任务，并打 tombstone 同步到其他端。删除后不可撤销；只想从清单收走的话，用「标记完成」。
+      </text>
+      <view class="cmf">
+        <view class="cbtn ghost" @tap="cancelDelete"><text>取消</text></view>
+        <view class="cbtn danger" @tap="confirmDelete"><text>删除任务</text></view>
+      </view>
     </view>
   </view>
 </template>
@@ -834,6 +880,85 @@ function askAi(): void {
 }
 
 .abtn:active { transform: scale(0.98); }
+
+/* 删除单独一行：与常规动作隔开距离，红色但保持"次要按钮"的轻量感 */
+.del-actions { margin-top: 8px; }
+
+.abtn.danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-bd);
+  color: var(--danger);
+}
+
+/* ── 删除确认 ───────────────────────────────────────────────────── */
+
+.cmask {
+  position: fixed;
+  inset: 0;
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  background: color-mix(in srgb, var(--bg-grad-3) 74%, transparent);
+  animation: mask-in 150ms var(--ease-out);
+}
+
+.cmodal {
+  width: 100%;
+  max-width: 400px;
+  padding: 18px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--bd-strong);
+  background: var(--s1);
+}
+
+.cmh {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--t1);
+  word-break: break-word;
+}
+
+.cmb {
+  display: block;
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: var(--t2);
+}
+
+.cmf {
+  display: flex;
+  gap: 9px;
+  margin-top: 16px;
+}
+
+.cbtn {
+  flex: 1;
+  height: 42px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.cbtn.ghost {
+  background: var(--s2);
+  border: 1px solid var(--bd);
+  color: var(--t2);
+}
+
+.cbtn.danger {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-bd);
+  color: var(--danger);
+}
+
+.cbtn:active { transform: scale(0.98); }
 
 .ai-desc {
   display: block;
