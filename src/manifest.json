@@ -29,7 +29,11 @@
       "ios": {
         "dSYMs": false,
         "privacyDescription": {
-          "NSCameraUsageDescription": "扫描配对二维码"
+          "NSCameraUsageDescription": "扫描配对二维码",
+          "NSLocalNetworkUsageDescription": "MOSS 需要访问局域网以连接你电脑上的 DSH 设备（配对与数据同步都在局域网内完成）。",
+          "NSBonjourServices": [
+            "_dshlink._tcp"
+          ]
         }
       },
       "sdkConfigs": {},
