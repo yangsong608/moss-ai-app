@@ -11,6 +11,8 @@
  *   - 解析失败 → 交给调用方降级成代码块，不丢内容
  */
 
+import { completeFenceJson, repairFenceJson } from './genui-repair'
+
 export interface GenuiNode {
   readonly type: string
   readonly [key: string]: unknown
@@ -97,14 +99,33 @@ function flatten(src: readonly unknown[], depth: number, kept: GenuiNode[], skip
  *
  * 返回 `undefined` 表示"这不是我们认得的结构"——调用方据此降级成代码块，
  * 而不是显示一个空壳。
+ *
+ * 解析分三级（对齐 dsh-genui 端的容错，否则电脑能渲染、手机掉原始 JSON）：
+ *   1. 裸 JSON.parse
+ *   2. Tier-1 修复（尾逗号、字符串内未转义半角引号）
+ *   3. Tier-2 补全（缺失的收尾引号/括号）——流式中可能短暂渲染不完整内容
  */
-export function parseGenui(raw: string): { spec: GenuiSpec; skipped: number } | undefined {
-  let data: unknown
+function parseSpecJson(raw: string): unknown {
   try {
-    data = JSON.parse(raw)
-  } catch {
-    return undefined
+    return JSON.parse(raw)
+  } catch { /* 继续修复 */ }
+  const tier1 = repairFenceJson(raw)
+  if (tier1 !== null) {
+    try {
+      return JSON.parse(tier1.text)
+    } catch { /* 继续补全 */ }
   }
+  const tier2 = completeFenceJson(raw)
+  if (tier2 !== null) {
+    try {
+      return JSON.parse(tier2.text)
+    } catch { /* 放弃 */ }
+  }
+  return undefined
+}
+
+export function parseGenui(raw: string): { spec: GenuiSpec; skipped: number } | undefined {
+  const data = parseSpecJson(raw)
   if (!isRecord(data)) return undefined
   const items = Array.isArray(data['items']) ? data['items'] : []
   if (items.length === 0) return undefined
