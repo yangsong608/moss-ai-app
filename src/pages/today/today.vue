@@ -239,19 +239,13 @@ function addQuick(e?: any): void {
 
 /* ── 清单 / 看板 / 历史 / 筛选 ─────────────────────────────────────── */
 
-type TaskView = 'list' | 'board' | 'history'
+type TaskView = 'list' | 'board'
 const taskView = ref<TaskView>('list')
 
 type FilterMode = 'all' | 'high' | 'sub'
 const filterMode = ref<FilterMode>('all')
 const FILTER_LABEL: Record<FilterMode, string> = { all: '筛选', high: '高优先', sub: '有子待办' }
 
-const collapsed = reactive<Record<TaskGroup, boolean>>({
-  today: false,
-  scheduled: false,
-  inbox: false,
-  done: false,
-})
 
 const filtered = computed(() => {
   const list = data.value.tasks
@@ -278,7 +272,6 @@ const groups = computed<GroupView[]>(() => {
     { key: 'today', label: '今天', icon: '✓', items: todays, hint: '今天还没有安排 · 用上面输入框记一件' },
     { key: 'scheduled', label: '之后安排', icon: '▦', items: rest.filter((t) => t.date !== ''), hint: '没有排到其他日期的任务' },
     { key: 'inbox', label: '未排期', icon: '▤', items: rest.filter((t) => t.date === ''), hint: '收件箱是空的' },
-    { key: 'done', label: '已完成', icon: '◷', items: list.filter((t) => t.done), hint: '还没有完成的任务' },
   ]
 })
 
@@ -379,23 +372,59 @@ function completedLabel(t: Task): string {
   return `${year}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm(t.updatedAt)}`
 }
 
-/** 历史 = 已完成，按完成时间倒序，再切成 今天 / 本周 / 更早。 */
-const historyGroups = computed<HistoryGroupView[]>(() => {
-  const buckets: Record<HistoryGroupView['key'], Task[]> = { today: [], week: [], earlier: [] }
-  historyTasks(data.value.tasks).forEach((t) => {
-    const day = completedIso(t)
-    if (day === todayIso.value) buckets.today.push(t)
-    else if (day >= weekStart.value) buckets.week.push(t)
-    else buckets.earlier.push(t)
-  })
-  return [
-    { key: 'today', label: '今天', icon: '✓', items: buckets.today, hint: '今天还没有完成的任务' },
-    { key: 'week', label: '本周', icon: '◷', items: buckets.week, hint: '本周早些时候没有完成的任务' },
-    { key: 'earlier', label: '更早', icon: '▤', items: buckets.earlier, hint: '更早没有完成的任务' },
-  ]
-})
+/**
+ * 台历页：一张卡片 = 一页日历。
+ * 「今天」一页 + 「之后安排」按日期各一页 + 「未排期」一页。
+ * 已完成的进日历，不在这里出现。
+ */
+interface CalPage {
+  key: string
+  kind: 'today' | 'date' | 'inbox'
+  big: string
+  month: string
+  sub: string
+  items: Task[]
+  hint: string
+}
 
-const historyCount = computed(() => historyGroups.value.reduce((n, g) => n + g.items.length, 0))
+const WEEK_TXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function mdOf(iso: string): { month: string; day: string; week: string } {
+  const d = new Date(`${iso}T00:00:00`)
+  return { month: `${d.getMonth() + 1}月`, day: String(d.getDate()).padStart(2, '0'), week: WEEK_TXT[d.getDay()] ?? '' }
+}
+
+const pages = computed<CalPage[]>(() => {
+  const g = groups.value
+  const out: CalPage[] = []
+
+  const todayG = g.find((x) => x.key === 'today')
+  if (todayG !== undefined) {
+    const md = mdOf(todayIso.value)
+    out.push({ key: 'today', kind: 'today', big: md.day, month: md.month, sub: `今天 · ${md.week}`, items: todayG.items, hint: todayG.hint })
+  }
+
+  const sched = g.find((x) => x.key === 'scheduled')
+  if (sched !== undefined) {
+    const byDate = new Map<string, Task[]>()
+    sched.items.forEach((t) => {
+      const bucket = byDate.get(t.date) ?? []
+      bucket.push(t)
+      byDate.set(t.date, bucket)
+    })
+    Array.from(byDate.keys()).sort().forEach((iso) => {
+      const md = mdOf(iso)
+      out.push({ key: `d-${iso}`, kind: 'date', big: md.day, month: md.month, sub: `已排期 · ${md.week}`, items: byDate.get(iso) ?? [], hint: '' })
+    })
+  }
+
+  const inbox = g.find((x) => x.key === 'inbox')
+  if (inbox !== undefined) {
+    out.push({ key: 'inbox', kind: 'inbox', big: '✦', month: '收件箱', sub: '未排期', items: inbox.items, hint: inbox.hint })
+  }
+
+  return out
+})
 
 function setView(v: TaskView): void {
   if (taskView.value === v) return
@@ -407,11 +436,6 @@ function cycleFilter(): void {
   const order: FilterMode[] = ['all', 'high', 'sub']
   const idx = order.indexOf(filterMode.value)
   filterMode.value = order[(idx + 1) % order.length]!
-  haptic('light')
-}
-
-function toggleGroup(key: TaskGroup): void {
-  collapsed[key] = !collapsed[key]
   haptic('light')
 }
 
@@ -649,37 +673,52 @@ function doClear(): void {
         <view class="seg">
           <view class="seg-btn" :class="{ on: taskView === 'list' }" @tap="setView('list')"><text>清单</text></view>
           <view class="seg-btn" :class="{ on: taskView === 'board' }" @tap="setView('board')"><text>看板</text></view>
-          <view class="seg-btn" :class="{ on: taskView === 'history' }" @tap="setView('history')"><text>历史</text></view>
         </view>
-        <view v-if="taskView !== 'history'" class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
+        <view class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
           <text>{{ FILTER_LABEL[filterMode] }}</text>
         </view>
       </view>
 
-      <!-- 清单 -->
-      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="groups">
-        <view v-for="g in visibleGroups" :key="g.key" class="group">
-          <view class="ghead" @tap="toggleGroup(g.key)">
-            <view class="gi" :class="{ mut: g.key === 'done', warn: g.key === 'scheduled' }">
-              <text>{{ g.icon }}</text>
-            </view>
-            <text class="gt">{{ g.label }}</text>
-            <text class="mono gn">{{ g.items.length }}</text>
-            <view class="sp" />
-            <view class="chev" :class="{ up: collapsed[g.key] }" />
+      <!-- 清单：台历翻页页（今天 / 各排期日 / 未排期 各一页） -->
+      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="calpages">
+        <view
+          v-for="(pg, pi) in pages"
+          :key="pg.key"
+          class="calpage"
+          :class="[pg.kind, pi < 8 ? 'enter' : '']"
+          :style="pi < 8 ? { animationDelay: `${pi * 55}ms` } : undefined"
+        >
+          <!-- 装订条 + 打孔 -->
+          <view class="calbind">
+            <view v-for="i in 11" :key="i" class="hole" />
           </view>
 
-          <view v-if="!collapsed[g.key]" class="gbody">
+          <!-- 页面上的日期块 -->
+          <view class="calhead">
+            <view class="caldate">
+              <text class="calmonth mono">{{ pg.month }}</text>
+              <text class="calbig mono">{{ pg.big }}</text>
+            </view>
+            <view class="calmeta">
+              <text class="calsub">{{ pg.sub }}</text>
+              <text class="calcoun mono">{{ pg.items.length }} 项</text>
+            </view>
+            <view class="calstat">
+              <view class="caldot" :class="pg.kind" />
+            </view>
+          </view>
+
+          <view class="calrows">
             <view
-              v-for="(t, index) in g.items"
+              v-for="(t, index) in pg.items"
               :key="t.id"
               class="trow"
-              :class="[{ done: t.done || completingIds.has(t.id), cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, g.key === 'done')]"
+              :class="[{ cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, false)]"
               @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
               <view class="tbar" :style="statusStyle(t)" />
-              <view class="check" :class="{ on: t.done || completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
+              <view class="check" :class="{ on: completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
                 <text class="cg"><text class="cg-line" /><text class="cg-line" /></text>
               </view>
               <view class="tbody">
@@ -702,11 +741,19 @@ function doClear(): void {
                 </view>
               </view>
             </view>
-            <view v-if="g.items.length === 0" class="gempty fb-empty">
-              <text class="fb-empty-icon">✓</text>
-              <text>{{ g.hint }}</text>
+
+            <view v-if="pg.items.length === 0" class="calempty fb-empty">
+              <text class="fb-empty-icon">{{ pg.kind === 'today' ? '☀' : '✓' }}</text>
+              <text>{{ pg.hint || '这一页是空的' }}</text>
             </view>
           </view>
+
+          <!-- 页脚：像台历底部的品牌行 -->
+          <view class="calfoot">
+            <text class="calfoot-t mono">{{ pg.kind === 'today' ? 'TODAY' : pg.kind === 'inbox' ? 'INBOX' : 'PLANNED' }}</text>
+            <text class="calfoot-d">{{ pg.items.length }} / {{ pages.length }} 页</text>
+          </view>
+          <view class="calfold" />
         </view>
       </view>
 
@@ -739,51 +786,6 @@ function doClear(): void {
         </view>
       </scroll-view>
 
-      <!-- 历史：已完成，按完成时间倒序，分 今天 / 本周 / 更早 -->
-      <view v-else class="history">
-        <view class="history-hint">
-          <text class="hh-t">完成记录</text>
-          <text class="mono hh-n">{{ historyCount }} 项 · 按完成时间倒序</text>
-        </view>
-
-        <template v-if="historyCount > 0">
-          <view v-for="g in historyGroups" :key="g.key" class="group">
-            <view class="ghead">
-              <view class="gi" :class="{ mut: g.key !== 'today' }"><text>{{ g.icon }}</text></view>
-              <text class="gt">{{ g.label }}</text>
-              <text class="mono gn">{{ g.items.length }}</text>
-              <view class="sp" />
-            </view>
-            <view class="gbody">
-              <view v-for="(t, index) in g.items" :key="t.id" class="hrow" :class="taskFeedbackClass(t, index, true)" @tap="openTask(t.id)">
-                <view class="hbody">
-                  <text class="ht">{{ t.title }}</text>
-                  <view class="hmeta">
-                    <text class="hmi time mono">完成 {{ completedLabel(t) }}</text>
-                    <text class="hmi dev">{{ t.dev }}</text>
-                    <text v-if="t.date !== ''" class="hmi date">任务日期 {{ t.date }}</text>
-                  </view>
-                </view>
-                <view class="hacts">
-                  <view class="hact" @tap.stop="restoreTask(t.id)"><text>恢复为未完成</text></view>
-                  <view class="hact cal" @tap.stop="openCalendar"><text>在日历中查看</text></view>
-                  <view class="hact del" @tap.stop="askDelete(t)"><text>删除</text></view>
-                </view>
-              </view>
-              <view v-if="g.items.length === 0" class="gempty fb-empty">
-              <text class="fb-empty-icon">✓</text>
-              <text>{{ g.hint }}</text>
-            </view>
-            </view>
-          </view>
-        </template>
-
-        <view v-else class="history-empty">
-          <text class="he-g fb-empty-icon">◷</text>
-          <text class="he-t">还没有完成记录</text>
-          <text class="he-d">切回清单勾选一项任务，完成记录会出现在这里。</text>
-        </view>
-      </view>
     </view>
 
     <!-- 长按操作菜单（页面自绘，与全应用弹层观感一致） -->
@@ -1171,67 +1173,122 @@ function doClear(): void {
 
 /* ── 分组与任务行 ───────────────────────────────────────────────── */
 
-.groups {
+/* ── 台历翻页页：一张卡 = 一页日历 ─────────────────────────────────── */
+.calpages {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+  perspective: 900px;
 }
 
-.ghead {
+.calpage {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--bd);
+  border-radius: 18px;
+  background: var(--s1);
+  box-shadow:
+    0 1px 0 var(--bd),
+    0 10px 26px color-mix(in srgb, var(--t1) 9%, transparent),
+    0 2px 6px color-mix(in srgb, var(--t1) 5%, transparent);
+  transform-origin: top center;
+}
+
+/* 装订条 + 打孔 */
+.calbind {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 2px 8px;
+  justify-content: space-evenly;
+  height: 20px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 9%, var(--s2)), var(--s1));
+  border-bottom: 1px solid var(--bd);
 }
 
-.gi {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  color: var(--acc);
-  background: var(--acc-soft);
+.hole {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--t1) 30%, transparent), 0 1px 0 color-mix(in srgb, var(--s1) 80%, transparent);
 }
 
-.gi.mut { color: var(--t2); background: var(--s3); }
-.gi.warn { color: var(--warn); background: var(--warn-soft); }
-
-.gt {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--t3);
-  text-transform: uppercase;
+/* 日期块 */
+.calhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px 10px;
 }
 
-.gn {
-  font-size: 9px;
-  color: var(--t2);
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--s3);
-}
-
-.chev {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  margin-right: 3px;
-  border-right: 1.5px solid var(--t3);
-  border-bottom: 1.5px solid var(--t3);
-  transform: rotate(45deg);
-  transition: transform var(--t-mid) var(--ease-out);
-}
-
-.chev.up { transform: rotate(-45deg); }
-
-.gbody {
+.caldate {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--acc-soft);
+  border: 1px solid color-mix(in srgb, var(--acc) 26%, transparent);
+}
+
+.calmonth { font-size: 8px; letter-spacing: 0.12em; color: var(--acc); text-transform: uppercase; }
+.calbig { font-size: 26px; font-weight: 700; line-height: 1.05; letter-spacing: -0.04em; color: var(--t1); }
+
+.calmeta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.calsub { font-size: 11.5px; font-weight: 650; color: var(--t1); letter-spacing: 0.01em; }
+.calcoun { font-size: 9px; color: var(--t3); }
+
+.calstat { flex: 0 0 auto; }
+.caldot { width: 7px; height: 7px; border-radius: 50%; background: var(--acc); }
+.caldot.date { background: var(--st-doing); }
+.caldot.inbox { background: var(--t3); }
+
+/* 页面上的任务行：淡化成"纸上的行"，不再各自带卡片底 */
+.calrows { display: flex; flex-direction: column; padding: 0 14px 4px; }
+
+.calrows .trow {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--bd-strong) 55%, transparent);
+  padding: 11px 2px;
+}
+.calrows .trow:last-child { border-bottom: 0; }
+.calrows .trow:active { background: var(--s2); border-radius: 8px; }
+
+.calempty { padding: 14px 0 16px; }
+
+/* 页脚 + 右下折角 */
+.calfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--bd);
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--s2) 70%, transparent));
+}
+.calfoot-t { font-size: 7px; letter-spacing: 0.18em; color: var(--t3); }
+.calfoot-d { font-size: 8px; color: var(--t3); }
+
+.calfold {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(135deg, transparent 48%, color-mix(in srgb, var(--t1) 10%, var(--s2)) 50%);
+  box-shadow: -1px -1px 0 color-mix(in srgb, var(--bd-strong) 60%, transparent);
+  pointer-events: none;
+}
+
+/* 翻页入场 */
+.calpage.enter { animation: page-flip 320ms var(--ease-out) both; }
+@keyframes page-flip {
+  from { opacity: 0; transform: translateY(10px) rotateX(-7deg); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); }
 }
 
 .trow {
