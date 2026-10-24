@@ -37,6 +37,7 @@ import {
   type TaskStatus,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { lunarDayLabel } from '@/core/lunar'
 import { state } from '@/core/store'
 
 const { data } = useWork()
@@ -363,10 +364,30 @@ const todayMD = computed(() => {
   }
 })
 
-/** 只看今天：日历口径的当日集合，去掉已完成，按开始时间升序（无时间的排最后） */
+/** 当前查看的日期（默认今天；可前后翻） */
+const viewIso = ref(todayIso.value)
+const isViewToday = computed(() => viewIso.value === todayIso.value)
+
+// 跨午夜：仍停在"今天"时跟随系统翻篇
+watch(todayIso, (iso) => {
+  if (isViewToday.value) viewIso.value = iso
+})
+
+const viewMD = computed(() => {
+  const d = new Date(`${viewIso.value}T00:00:00`)
+  return {
+    month: `${d.getMonth() + 1}月`,
+    day: String(d.getDate()).padStart(2, '0'),
+    week: WEEK_TXT[d.getDay()] ?? '',
+    lunar: lunarDayLabel(d),
+  }
+})
+
+/** 当天全部任务卡片：今天只看未完成；其它日期全显示（已完成弱化） */
 const todayCards = computed<Task[]>(() => {
-  const onDay = tasksOnDay(data.value.tasks, todayIso.value).filter((t) => !t.done)
-  return onDay.slice().sort((a, b) => {
+  const onDay = tasksOnDay(data.value.tasks, viewIso.value)
+  const list = isViewToday.value ? onDay.filter((t) => !t.done) : onDay
+  return list.slice().sort((a, b) => {
     const sa = taskSpan(a)?.start ?? Number.MAX_SAFE_INTEGER
     const sb = taskSpan(b)?.start ?? Number.MAX_SAFE_INTEGER
     if (sa !== sb) return sa - sb
@@ -374,39 +395,53 @@ const todayCards = computed<Task[]>(() => {
   })
 })
 
-const cardMode = ref(true)
-const cardIndex = ref(0)
-const flipping = ref(false)
-const flipDir = ref<1 | -1>(1)
+const viewDone = computed(() => todayCards.value.filter((t) => t.done).length)
 
-const currentCard = computed<Task | undefined>(() => todayCards.value[Math.min(cardIndex.value, Math.max(todayCards.value.length - 1, 0))])
+/** 翻页动画标记（260ms 后清除，收尾不留 transform） */
+const pageFlip = ref<'' | 'prev' | 'next'>('')
+let flipTimer: ReturnType<typeof setTimeout> | null = null
 
-watch(todayCards, (list) => {
-  if (list.length === 0) cardIndex.value = 0
-  else if (cardIndex.value > list.length - 1) cardIndex.value = list.length - 1
-})
+function setFlip(dir: '' | 'prev' | 'next'): void {
+  if (stateLiteOrReduced()) return
+  pageFlip.value = dir
+  if (flipTimer !== null) clearTimeout(flipTimer)
+  flipTimer = setTimeout(() => { pageFlip.value = '' }, 280)
+}
 
-function goCard(delta: number): void {
-  const n = todayCards.value.length
-  if (n <= 1 || flipping.value) return
-  const next = cardIndex.value + delta
-  if (next < 0 || next > n - 1) return
-  flipDir.value = delta > 0 ? 1 : -1
-  const reduced = stateLiteOrReduced()
-  if (reduced) {
-    cardIndex.value = next
-    return
-  }
-  flipping.value = true
-  cardIndex.value = next
-  setTimeout(() => { flipping.value = false }, 260)
+function pageDay(delta: number): void {
+  const t0 = new Date(`${viewIso.value}T00:00:00`).getTime()
+  viewIso.value = isoDay(new Date(t0 + delta * 86400000))
   haptic('light')
+  setFlip(delta > 0 ? 'next' : 'prev')
+}
+
+function backToToday(): void {
+  if (isViewToday.value) return
+  viewIso.value = todayIso.value
+  haptic('light')
+  setFlip('prev')
+}
+
+let pageTouchX = 0
+let pageTouchY = 0
+function onPageTouchStart(e: any): void {
+  pageTouchX = e?.touches?.[0]?.clientX ?? 0
+  pageTouchY = e?.touches?.[0]?.clientY ?? 0
+}
+function onPageTouchEnd(e: any): void {
+  const x = e?.changedTouches?.[0]?.clientX ?? pageTouchX
+  const y = e?.changedTouches?.[0]?.clientY ?? pageTouchY
+  const dx = x - pageTouchX
+  const dy = y - pageTouchY
+  if (Math.abs(dx) < 44 || Math.abs(dx) < Math.abs(dy)) return
+  pageDay(dx < 0 ? 1 : -1)
 }
 
 /* ── 卡片内联快捷编辑：备注 / 标签 / 优先级（不弹框） ─────────────── */
 
 const noteEditing = ref(false)
 const noteDraft = ref('')
+const editRowId = ref('')
 const tagEditing = ref(false)
 const tagDraft = ref('')
 const confirmDelId = ref('')
@@ -415,14 +450,21 @@ const PRI_CYCLE: Task['pri'][] = ['normal', 'high', 'low']
 const PRI_LABEL: Record<Task['pri'], string> = { normal: '普通', high: '高', low: '低' }
 
 function startNote(t: Task): void {
+  editRowId.value = t.id
   noteEditing.value = true
   noteDraft.value = t.note
+}
+
+function startTag(t: Task): void {
+  editRowId.value = t.id
+  tagEditing.value = true
 }
 
 function saveNote(t: Task): void {
   const v = noteDraft.value.trim()
   updateTask(t.id, { note: v })
   noteEditing.value = false
+  editRowId.value = ''
   haptic('light')
   toast(v.length > 0 ? '备注已保存' : '备注已清空')
 }
@@ -437,6 +479,7 @@ function commitTag(t: Task): void {
   const v = tagDraft.value.trim().replace(/^#/, '')
   tagEditing.value = false
   tagDraft.value = ''
+  editRowId.value = ''
   if (v.length === 0) return
   if (t.tags.includes(v)) return
   updateTask(t.id, { tags: [...t.tags, v] })
@@ -481,17 +524,6 @@ function celebrate(): void {
   }))
   burst.value = true
   setTimeout(() => { burst.value = false; particles.value = [] }, 950)
-}
-
-let touchY = 0
-function onCardTouStart(e: any): void {
-  touchY = e?.touches?.[0]?.clientY ?? 0
-}
-function onCardTouEnd(e: any): void {
-  const y = e?.changedTouches?.[0]?.clientY ?? touchY
-  const dy = y - touchY
-  if (Math.abs(dy) < 36) return
-  goCard(dy < 0 ? 1 : -1)
 }
 
 
@@ -726,64 +758,53 @@ function doClear(): void {
       </view>
 
       <view class="calwrap">
-        <view class="calbar">
-          <view class="caltoggle">
-            <view class="ct-btn" :class="{ on: cardMode }" role="button" aria-label="翻页卡片" @tap="cardMode = true">
-              <text class="ct-ic">▤</text>
-            </view>
-            <view class="ct-btn" :class="{ on: !cardMode }" role="button" aria-label="列表" @tap="cardMode = false">
-              <text class="ct-ic">☰</text>
-            </view>
-          </view>
-          <text class="calbar-n mono">{{ todayCards.length }} 项 · 按时间</text>
-        </view>
-
-        <!-- 翻页卡片：一页一条，按时间升序 -->
-        <view v-if="cardMode" class="calpage today">
+        <!-- 台历日页：头部可前后翻页，卡片按时间堆叠（保留原任务卡片样式） -->
+        <view class="calpage" :class="pageFlip !== '' ? `flip-${pageFlip}` : ''">
           <view class="calbind">
             <view v-for="i in 11" :key="i" class="hole" />
           </view>
 
           <view class="calhead">
+            <view class="daynav" role="button" aria-label="前一天" @tap="pageDay(-1)"><text class="dnav-g">‹</text></view>
             <view class="caldate">
-              <text class="calmonth mono">{{ todayMD.month }}</text>
-              <text class="calbig mono">{{ todayMD.day }}</text>
+              <text class="calmonth mono">{{ viewMD.month }}</text>
+              <text class="calbig mono">{{ viewMD.day }}</text>
             </view>
             <view class="calmeta">
-              <text class="calsub">今天 · {{ todayMD.week }}</text>
-              <text class="calcoun mono">{{ todayCards.length }} 项待办</text>
+              <view class="calrow1">
+                <text class="calsub">{{ isViewToday ? '今天' : '日程' }} · {{ viewMD.week }}</text>
+                <text v-if="viewMD.lunar !== ''" class="callunar">{{ viewMD.lunar }}</text>
+              </view>
+              <text class="calcoun mono">{{ todayCards.length }} 项{{ viewDone > 0 ? ` · 已完成 ${viewDone}` : '' }}</text>
             </view>
-            <text v-if="todayCards.length > 0" class="calidx mono">{{ cardIndex + 1 }} / {{ todayCards.length }}</text>
+            <view class="daynav" role="button" aria-label="后一天" @tap="pageDay(1)"><text class="dnav-g">›</text></view>
           </view>
 
-          <view class="flipzone" @touchstart="onCardTouStart" @touchend="onCardTouEnd">
-            <view v-if="todayCards.length > 2" class="peek p3" />
-            <view v-if="todayCards.length > 1" class="peek p2" />
+          <view v-if="!isViewToday" class="calback" @tap="backToToday"><text>‹ 回到今天</text></view>
+
+          <view class="cardlist" @touchstart="onPageTouchStart" @touchend="onPageTouchEnd">
             <view
-              v-if="currentCard !== undefined"
-              :key="currentCard.id"
+              v-for="(t, index) in todayCards"
+              :key="t.id"
               class="flipcard"
-              :class="{ up: flipDir === 1, down: flipDir === -1, flipping }"
-              @tap="openTask(currentCard.id)"
-              @longpress="openRowMenu(currentCard)"
+              :class="[{ done: t.done }, ...taskFeedbackClass(t, index, t.done)]"
+              @tap="openTask(t.id)"
+              @longpress="openRowMenu(t)"
             >
               <view class="fc-top">
-              <text class="fc-when mono" :class="{ due: isDue(currentCard) }">{{ currentCard.when }}</text>
-              <text class="fc-st" :style="statusChipStyle(currentCard)">{{ statusLabel(currentCard) }}</text>
-              <!-- 优先级：点一下循环切换 -->
-              <view class="fc-pri" :class="currentCard.pri" @tap.stop="cyclePri(currentCard)">
-                <text class="fc-pri-dot" />
-                <text>{{ PRI_LABEL[currentCard.pri] }}</text>
+                <text class="fc-when mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
+                <text class="fc-st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
+                <view class="fc-pri" :class="t.pri" @tap.stop="cyclePri(t)">
+                  <text class="fc-pri-dot" />
+                  <text>{{ PRI_LABEL[t.pri] }}</text>
+                </view>
+                <view class="sp" />
+                <view class="tmenu" @tap.stop="openRowMenu(t)"><text class="tmenu-g">⋯</text></view>
               </view>
-              <view class="sp" />
-              <view class="tmenu" @tap.stop="openRowMenu(currentCard)"><text class="tmenu-g">⋯</text></view>
-            </view>
 
-            <text class="fc-title">{{ currentCard.title }}</text>
+              <text class="fc-title">{{ t.title }}</text>
 
-            <!-- 备注：点开就地编辑 -->
-            <view class="fc-note">
-              <template v-if="noteEditing">
+              <view v-if="noteEditing && editRowId === t.id" class="fc-note">
                 <textarea
                   v-model="noteDraft"
                   class="fc-note-in"
@@ -794,132 +815,62 @@ function doClear(): void {
                 />
                 <view class="fc-note-acts">
                   <view class="fc-mini ghost" @tap.stop="noteEditing = false"><text>取消</text></view>
-                  <view class="fc-mini" @tap.stop="saveNote(currentCard)"><text>保存</text></view>
+                  <view class="fc-mini" @tap.stop="saveNote(t)"><text>保存</text></view>
                 </view>
-              </template>
-              <view v-else class="fc-note-ro" @tap.stop="startNote(currentCard)">
-                <text v-if="currentCard.note" class="fc-note-t">{{ currentCard.note }}</text>
-                <text v-else class="fc-note-ph">＋ 添加备注</text>
+              </view>
+              <view v-else class="fc-note" @tap.stop="startNote(t)">
+                <view class="fc-note-ro">
+                  <text v-if="t.note" class="fc-note-t">{{ t.note }}</text>
+                  <text v-else class="fc-note-ph">＋ 添加备注</text>
+                </view>
+              </view>
+
+              <view class="fc-tags">
+                <view v-for="tag in t.tags" :key="tag" class="fc-tag" @tap.stop="removeTag(t, tag)">
+                  <text>#{{ tag }}</text><text class="fc-tag-x">✕</text>
+                </view>
+                <view v-if="tagEditing && editRowId === t.id" class="fc-tag-in-wrap">
+                  <input
+                    v-model="tagDraft"
+                    class="fc-tag-in"
+                    placeholder="标签名"
+                    placeholder-class="ph"
+                    :focus="tagEditing"
+                    confirm-type="done"
+                    @confirm="commitTag(t)"
+                    @blur="commitTag(t)"
+                  />
+                </view>
+                <view v-else class="fc-tag-add" @tap.stop="startTag(t)"><text>＋ 标签</text></view>
+                <text v-if="t.sub.length > 0" class="tmi mono">{{ subText(t) }}</text>
+              </view>
+
+              <view class="fc-acts">
+                <view class="fc-done" @tap.stop="toggle(t.id)">
+                  <text class="fc-cg" />
+                  <text>{{ t.done ? '已完成' : '完成' }}</text>
+                </view>
+                <view class="fc-del" :class="{ armed: confirmDelId === t.id }" @tap.stop="askDeleteCard(t)">
+                  <text>{{ confirmDelId === t.id ? '确认删除' : '✕ 删除' }}</text>
+                </view>
+                <text class="fc-hint">{{ index + 1 }} / {{ todayCards.length }}</text>
               </view>
             </view>
 
-            <!-- 标签：就地增删 -->
-            <view class="fc-tags">
-              <view v-for="tag in currentCard.tags" :key="tag" class="fc-tag" @tap.stop="removeTag(currentCard, tag)">
-                <text>#{{ tag }}</text>
-                <text class="fc-tag-x">✕</text>
-              </view>
-              <view v-if="tagEditing" class="fc-tag-in-wrap">
-                <input
-                  v-model="tagDraft"
-                  class="fc-tag-in"
-                  placeholder="标签名"
-                  placeholder-class="ph"
-                  :focus="tagEditing"
-                  confirm-type="done"
-                  @confirm="commitTag(currentCard)"
-                  @blur="commitTag(currentCard)"
-                />
-              </view>
-              <view v-else class="fc-tag-add" @tap.stop="tagEditing = true"><text>＋ 标签</text></view>
-              <text v-if="currentCard.sub.length > 0" class="tmi mono">{{ subText(currentCard) }}</text>
+            <view v-if="todayCards.length === 0" class="flipempty fb-empty">
+              <text class="fb-empty-icon">{{ isViewToday ? '☀' : '▦' }}</text>
+              <text>{{ isViewToday ? '今天还没有安排' : '这一天没有任务' }}</text>
+              <text class="fe-d">左右滑动或点箭头翻页</text>
             </view>
-
-            <view class="fc-acts">
-              <view class="fc-done" @tap.stop="toggle(currentCard.id)">
-                <text class="fc-cg" />
-                <text>完成</text>
-              </view>
-              <view
-                class="fc-del"
-                :class="{ armed: confirmDelId === currentCard.id }"
-                @tap.stop="askDeleteCard(currentCard)"
-              >
-                <text>{{ confirmDelId === currentCard.id ? '确认删除' : '✕ 删除' }}</text>
-              </view>
-              <text class="fc-hint">上下翻页</text>
-            </view>
-
-            <!-- 彩蛋：完成时纸屑爆开 -->
-            <view v-if="burst" class="burst">
-              <view
-                v-for="(p, i) in particles"
-                :key="i"
-                class="pt"
-                :style="{
-                  '--dx': `${p.dx}px`,
-                  '--dy': `${p.dy}px`,
-                  '--rot': `${p.rot}deg`,
-                  '--delay': `${p.delay}ms`,
-                  background: p.color,
-                }"
-              />
-            </view>
-          </view>
-
-            <view v-else class="flipempty fb-empty">
-              <text class="fb-empty-icon">☀</text>
-              <text>今天还没有安排</text>
-              <text class="fe-d">用上面的输入框记一件，或去日历排期</text>
-            </view>
-          </view>
-
-          <view v-if="todayCards.length > 1" class="calnav">
-            <view class="navbtn" :class="{ mut: cardIndex === 0 }" @tap="goCard(-1)"><text>↑</text></view>
-            <view class="dots">
-              <view v-for="(t, i) in todayCards" :key="t.id" class="dot" :class="{ on: i === cardIndex }" />
-            </view>
-            <view class="navbtn" :class="{ mut: cardIndex >= todayCards.length - 1 }" @tap="goCard(1)"><text>↓</text></view>
           </view>
 
           <view class="calfoot">
-            <text class="calfoot-t mono">TODAY</text>
-            <text class="calfoot-d">只显示今天 · 已完成进日历</text>
+            <text class="calfoot-t mono">{{ isViewToday ? 'TODAY' : viewIso }}</text>
+            <text class="calfoot-d">{{ isViewToday ? '只有未完成 · 已完成在日历' : '含已完成' }}</text>
           </view>
           <view class="calfold" />
         </view>
-
-        <!-- 列表模式：同样的当日集合，按时间排 -->
-        <view v-else class="callist">
-          <view
-            v-for="(t, index) in todayCards"
-            :key="t.id"
-            class="trow"
-            :class="[{ cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, false)]"
-            @tap="openTask(t.id)"
-            @longpress="openRowMenu(t)"
-          >
-            <view class="tbar" :style="statusStyle(t)" />
-            <view class="check" :class="{ on: completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
-              <text class="cg"><text class="cg-line" /><text class="cg-line" /></text>
-            </view>
-            <view class="tbody">
-              <text class="tt">{{ t.title }}</text>
-              <view class="tmeta">
-                <text class="tmi st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
-                <text v-if="isCrossDay(t)" class="tmi span mono">{{ spanLabel(t) }}</text>
-                <text v-if="t.sub.length > 0" class="tmi mono">{{ subText(t) }}</text>
-                <text v-for="tag in t.tags" :key="tag" class="tmi">#{{ tag }}</text>
-                <text v-if="t.pri === 'high'" class="tmi high">高优先</text>
-              </view>
-            </view>
-            <view class="tright">
-              <text class="twhen mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
-              <view class="tright-r">
-                <view v-if="t.sync" class="syncdot" />
-                <view class="tmenu" @tap.stop="openRowMenu(t)"><text class="tmenu-g">⋯</text></view>
-              </view>
-            </view>
-          </view>
-
-          <view v-if="todayCards.length === 0" class="calempty fb-empty">
-            <text class="fb-empty-icon">☀</text>
-            <text>今天还没有安排</text>
-          </view>
-        </view>
       </view>
-
-    </view>
 
     <!-- 长按操作菜单（页面自绘，与全应用弹层观感一致） -->
     <view v-if="menuOpen" class="mask menu-mask" @tap="closeMenu">
@@ -978,6 +929,7 @@ function doClear(): void {
           <view class="btn primary" @tap="doClear"><text>清掉 {{ stats.done }} 项</text></view>
         </view>
       </view>
+    </view>
     </view>
   </WorkShell>
 </template>
@@ -2245,4 +2197,33 @@ function doClear(): void {
 @media (min-width: 1000px) {
   .today { max-width: 860px; margin: 0 auto; width: 100%; }
 }
+
+/* ── 台历日页：翻页导航 / 农历 / 卡片堆 ─────────────────────────────── */
+.calrow1 { display: flex; align-items: center; gap: 7px; }
+.callunar {
+  padding: 1px 6px; border-radius: 6px;
+  background: var(--s3); color: var(--t2);
+  font-size: 9px; letter-spacing: 0.02em;
+}
+.daynav {
+  width: 28px; height: 28px; flex: 0 0 28px;
+  display: grid; place-items: center;
+  border-radius: 9px; border: 1px solid var(--bd);
+  background: var(--s1); color: var(--t2);
+}
+.daynav:active { background: var(--s2); color: var(--acc); }
+.dnav-g { font-size: 15px; line-height: 1; }
+.calback {
+  display: inline-flex; margin: 0 14px 6px;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--acc-soft); color: var(--acc); font-size: 9.5px;
+}
+.cardlist { display: flex; flex-direction: column; gap: 10px; padding: 2px 14px 12px; }
+.flipcard.done { opacity: 0.72; }
+.flipcard.done .fc-title { color: var(--st-done); text-decoration: line-through; text-decoration-thickness: 1px; }
+.calpage.flip-next { animation: page-next 260ms var(--ease-out) both; }
+.calpage.flip-prev { animation: page-prev 260ms var(--ease-out) both; }
+@keyframes page-next { from { opacity: 0.4; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes page-prev { from { opacity: 0.4; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+
 </style>
