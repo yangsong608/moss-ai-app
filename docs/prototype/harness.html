@@ -18,9 +18,10 @@ const CASES = [
 const TABS = [
   ['今天', ['今天', '收件箱']],
   ['日历', ['周', '安排']],
+  ['笔记', ['笔记本', '新建']],
   ['专注', ['专注', '25']],
   ['资讯', ['检索', '订阅']],
-  ['我的', ['笔记', '设置']],
+  ['我的', ['设置', '设备']],
 ]
 const out = []
 const ok = (cond, label) => out.push(`${cond ? 'PASS' : 'FAIL'} ${label}`)
@@ -29,7 +30,7 @@ function makeFrame(c) {
   return new Promise((resolve) => {
     const f = document.createElement('iframe')
     f.style.cssText = `width:${c.w}px;height:${c.h}px;border:0;display:block`
-    f.onload = () => setTimeout(() => resolve(f), 250)
+    f.onload = () => setTimeout(() => resolve(f), 800) // 重构后 JS 初始化变重：等事件委托注册完
     f.src = 'index.html'
     document.body.appendChild(f)
   })
@@ -57,7 +58,7 @@ async function runCase(c) {
       return true
     }
     ok(click(tab), `${c.name} Tab「${tab}」可点击`)
-    await new Promise((r) => setTimeout(r, 80))
+    await new Promise((r) => setTimeout(r, 120))
     const bodyText = doc.body.innerText
     ok(expect.some((k) => bodyText.includes(k)), `${c.name} 「${tab}」渲染（${expect.join('/')}）`)
   }
