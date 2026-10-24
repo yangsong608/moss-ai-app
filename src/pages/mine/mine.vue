@@ -6,8 +6,9 @@
  * 皮肤与明暗是全局的，改完 WorkShell 的根 class 立刻变，
  * 同时用 markUserPreference 落盘，冷启动不会被系统主题改回去。
  */
-import { pendingCount, lastSyncAt } from '@/core/sync-queue'
-import { computed } from 'vue'
+import { pendingCount, lastSyncAt, stateOf, syncStatus } from '@/core/sync-queue'
+import { syncNow } from '@/core/sync-engine'
+import { computed, ref } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
 import { deviceName, domainStats, switchDevice, useWork, work, workDevices } from '@/core/workbench'
 import { markUserPreference, state } from '@/core/store'
@@ -30,6 +31,38 @@ const lastSyncText = computed(() => {
   return mins < 1 ? '刚刚' : `${mins} 分钟前`
 })
 const conflicts = computed(() => data.value.tasks.filter((t) => t.conflict).length)
+
+/* ── 同步面板（P1-4）：真实队列 + 手动同步 ── */
+const panelOpen = ref(false)
+const syncing = computed(() => syncStatus.syncing)
+
+const entityRows = computed(() => {
+  const s = stateOf(work.deviceId)
+  const by: Record<string, number> = {}
+  for (const d of s.dirty) by[d.entity] = (by[d.entity] ?? 0) + 1
+  const label: Record<string, string> = {
+    tasks: '任务', notes: '笔记', notebooks: '笔记本', news_topics: '资讯订阅', focus_sessions: '专注', spaces: '空间',
+  }
+  return Object.entries(by).map(([k, n]) => ({ name: label[k] ?? k, n }))
+})
+
+const conflictNotes = computed(() => data.value.notes.filter((n) => n.title.startsWith('冲突副本')))
+
+function openNotes(): void {
+  panelOpen.value = false
+  uni.reLaunch({ url: '/pages/notes/notes' })
+}
+
+async function doSync(): Promise<void> {
+  if (syncing.value) return
+  const r = await syncNow()
+  haptic('light')
+  if (r.ok) {
+    uni.showToast({ title: `同步完成 · 推送 ${r.pushed} · 拉取 ${r.applied}`, icon: 'none' })
+  } else {
+    uni.showToast({ title: r.reason === 'offline' ? '未连接设备 · 仅本机可用' : '同步失败，稍后重试', icon: 'none' })
+  }
+}
 const recordCount = computed(
   () => data.value.tasks.length + data.value.notes.length + data.value.focus.length + data.value.news.length,
 )
@@ -132,12 +165,12 @@ function placeholder(text: string): void {
       </view>
 
       <!-- 同步状态（M2 占位，但仍展示真实的待推/冲突数） -->
-      <view class="sync-row" @tap="placeholder('同步面板将在 M2 接入：待推 / 冲突 / 重试都在这里处理')">
+      <view class="sync-row" @tap="panelOpen = true">
         <view class="sync-icon"><text>⇅</text></view>
         <view class="sync-main">
           <view class="sync-t">
             <text>同步状态</text>
-            <text class="sync-tag">M2 占位</text>
+            <text class="sync-tag">{{ syncing ? '同步中' : (pending > 0 ? '待推送' : '已同步') }}</text>
           </view>
           <text class="sync-d">
             待推 <text class="sync-n mono">{{ pending }}</text> 条 · 冲突
@@ -242,6 +275,33 @@ function placeholder(text: string): void {
           M1 本地优先：任务 / 笔记 / 专注 / 资讯都离线可用；M2 接入 wb.* 同步后，
           与各台电脑上的 DSH 工作台双向同步，冲突默认保留两份。
         </text>
+      </view>
+    </view>
+
+    <!-- 同步面板（P1-4） -->
+    <view v-if="panelOpen" class="ov" @tap="panelOpen = false">
+      <view class="ov-card" @tap.stop>
+        <view class="ov-h">
+          <text class="ov-t">同步 · {{ deviceName(work.deviceId) }}</text>
+          <text class="ov-x" @tap="panelOpen = false">✕</text>
+        </view>
+        <view class="ov-kv"><text>待推送</text><text class="mono">{{ pending }} 条</text></view>
+        <view class="ov-kv"><text>冲突</text><text class="mono">{{ conflicts }} 条</text></view>
+        <view class="ov-kv"><text>上次同步</text><text class="mono">{{ lastSyncText }}</text></view>
+        <view class="ov-kv"><text>游标</text><text class="mono">{{ stateOf(work.deviceId).cursor || '（首次全量）' }}</text></view>
+
+        <view v-if="entityRows.length > 0" class="ov-sect">待推明细</view>
+        <view v-for="r in entityRows" :key="r.name" class="ov-kv"><text>{{ r.name }}</text><text class="mono">{{ r.n }} 条</text></view>
+
+        <view v-if="conflictNotes.length > 0" class="ov-sect">冲突副本（已保留，不会丢）</view>
+        <view v-for="n in conflictNotes" :key="n.id" class="ov-note" @tap="openNotes">
+          <text class="ov-note-t">{{ n.title }}</text>
+          <text class="ov-note-s">点开笔记页处理</text>
+        </view>
+
+        <view v-if="syncStatus.lastError" class="ov-err">上次错误：{{ syncStatus.lastError }}</view>
+        <view class="ov-btn" :class="{ busy: syncing }" @tap="doSync"><text>{{ syncing ? '同步中…' : '立即同步' }}</text></view>
+        <view class="ov-hint">无连接或该设备未就绪时，数据只留在本机，不影响使用。</view>
       </view>
     </view>
   </WorkShell>
@@ -460,4 +520,34 @@ function placeholder(text: string): void {
   .dc-stats { gap: 10px; }
   .row { padding: 12px 16px; }
 }
+.ov {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(6, 14, 10, 0.48);
+  display: flex;
+  align-items: flex-end;
+}
+.ov-card {
+  width: 100%;
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--s1);
+  border-top-left-radius: var(--r-lg);
+  border-top-right-radius: var(--r-lg);
+  border: 1px solid var(--bd);
+  padding: 16px 18px calc(20px + env(safe-area-inset-bottom));
+}
+.ov-h { display: flex; align-items: center; margin-bottom: 10px; }
+.ov-t { flex: 1; font-size: 14px; font-weight: 650; }
+.ov-x { font-size: 14px; color: var(--t3); padding: 4px 6px; }
+.ov-kv { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 12px; color: var(--t2); border-bottom: 1px solid var(--s3); }
+.ov-sect { margin: 14px 0 4px; font-size: 11px; letter-spacing: 0.06em; color: var(--t3); }
+.ov-note { margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--warn-soft); border: 1px solid var(--bd); }
+.ov-note-t { display: block; font-size: 12px; color: var(--t1); }
+.ov-note-s { display: block; margin-top: 3px; font-size: 10.5px; color: var(--t3); }
+.ov-err { margin-top: 10px; font-size: 10.5px; color: var(--danger); line-height: 1.6; }
+.ov-btn { margin-top: 16px; height: 44px; border-radius: var(--r-md); background: var(--acc); color: var(--acc-ink); display: flex; align-items: center; justify-content: center; font-size: 13.5px; font-weight: 650; }
+.ov-btn.busy { opacity: 0.6; }
+.ov-hint { margin-top: 10px; font-size: 10.5px; color: var(--t3); line-height: 1.7; }
 </style>
