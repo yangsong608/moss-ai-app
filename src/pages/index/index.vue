@@ -818,7 +818,7 @@ onLoad(() => {
               @longpress="deviceMenu(d)"
             >
               <!-- 仅在线设备渲染旋转渐变；mask 只留下 1px 外圈。 -->
-              <view class="dev-rim"><view class="dev-flow" /></view>
+              <view v-if="statusOf(d) === 'online'" class="dev-rim"><view class="dev-flow" /></view>
               <view class="dev-head dev-content">
                 <view class="dev-dot">
                   <view v-if="statusOf(d) === 'online'" class="radar-ring" />
@@ -1714,6 +1714,34 @@ onLoad(() => {
   .devices-block .block-head, .devices-block .empty { grid-column: 1 / -1; }
   .dev { min-width: 0; }
   .hero-title { font-size: 34px; }
+}
+
+/* 横屏平板：配对操作收成右下浮动组，主体留白保证末项可完整滚出。 */
+@media (min-width: 900px) {
+  .wrap { padding-bottom: 148px; }
+
+  .dock {
+    position: absolute;
+    right: max(var(--gutter), calc((100% - var(--content-max)) / 2 + var(--gutter)));
+    bottom: calc(var(--safe-bottom-real, env(safe-area-inset-bottom)) + 20px);
+    width: auto;
+    padding: 10px 12px 8px;
+    border: 1px solid var(--bd);
+    border-radius: 20px;
+    background: linear-gradient(145deg, var(--glass-top), var(--glass-bottom));
+    box-shadow: var(--card-shadow), inset 0 1px 0 var(--glass-hi);
+  }
+
+  .dock-inner { width: max-content; max-width: none; margin: 0; gap: 6px; }
+
+  .cta {
+    width: 194px;
+    height: 42px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .dock-alt { min-height: 24px; font-size: 11px; }
 }
 
 /* state.lite：本页全部动画关闭；:deep 同时覆盖 MossDot / MossBadge 等子组件。 */

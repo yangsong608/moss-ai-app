@@ -213,16 +213,22 @@ onUnmounted(() => {
 <template>
   <WorkShell active="focus" title="专注" :sub="subTitle">
     <view class="focus-page">
+      <view class="focus-aurora aurora-a" />
+      <view class="focus-aurora aurora-b" />
       <view class="focus-main">
         <!-- 计时区 -->
-        <view class="timer-card">
-          <text class="eyebrow">FOCUS / {{ presetMin }} MIN</text>
-          <view class="ring">
-            <view class="ring-half right"><view class="ring-rotor" :style="rightRingStyle" /></view>
-            <view class="ring-half left"><view class="ring-rotor" :style="leftRingStyle" /></view>
-            <view class="ring-hole">
-              <text class="ring-time mono">{{ clock }}</text>
-              <text class="ring-state" :class="{ live: phase === 'running', done: phase === 'done' }">{{ phaseText }}</text>
+        <view class="timer-card fb-enter-card">
+          <text class="eyebrow">FOCUS CONSOLE / {{ presetMin }} MIN</text>
+          <view class="timer-dial">
+            <view class="dial-glow" :class="{ live: phase === 'running' }" />
+            <view class="dial-inner" />
+            <view class="ring">
+              <view class="ring-half right"><view class="ring-rotor" :style="rightRingStyle" /></view>
+              <view class="ring-half left"><view class="ring-rotor" :style="leftRingStyle" /></view>
+              <view class="ring-hole">
+                <text class="ring-time mono">{{ clock }}</text>
+                <text class="ring-state" :class="{ live: phase === 'running', done: phase === 'done' }">{{ phaseText }}</text>
+              </view>
             </view>
           </view>
 
@@ -240,16 +246,16 @@ onUnmounted(() => {
           </view>
 
           <view class="timer-btns">
-            <view class="btn primary" @tap="toggleRun">{{ primaryLabel }}</view>
-            <view class="btn" @tap="resetTimer">重置</view>
+            <view class="btn primary timer-primary" @tap="toggleRun"><text>{{ primaryLabel }}</text></view>
+            <view class="btn timer-reset" @tap="resetTimer"><text>重置</text></view>
           </view>
 
           <view v-if="phase === 'done' && focusTask && !focusTask.done" class="done-row">
             <text class="done-t">这一轮是为了「{{ focusTask.title }}」</text>
-            <view class="done-btn" @tap="markTaskDone"><text>标记任务完成</text></view>
+            <view class="done-btn timer-primary" @tap="markTaskDone"><text>标记任务完成</text></view>
           </view>
 
-          <view class="task-pick" @tap="pickerOpen = true">
+          <view class="task-pick glass-card" @tap="pickerOpen = true">
             <view class="dot" :class="{ off: focusTask === null }" />
             <view class="task-pick-main">
               <text class="task-cap">专注任务</text>
@@ -273,8 +279,8 @@ onUnmounted(() => {
           <view
             v-for="(t, i) in queueTasks"
             :key="t.id"
-            class="queue-item"
-            :class="[{ on: t.id === focusTaskId }, `fb-stagger fb-i-${i}`]"
+            class="queue-item glass-card"
+            :class="[{ on: t.id === focusTaskId }, i < 8 ? `fb-stagger fb-i-${i}` : '']"
             @tap="pickTask(t.id)"
           >
             <text class="queue-n mono">{{ i + 1 }}</text>
@@ -346,9 +352,53 @@ onUnmounted(() => {
 </template>
 
 <style lang="scss" scoped>
-.focus-page { padding-top: 2px; }
+.focus-page {
+  position: relative;
+  padding-top: 2px;
+  --console-glass: color-mix(in srgb, var(--s1) 80%, transparent);
+  --console-glass-low: color-mix(in srgb, var(--s2) 62%, transparent);
+  --console-highlight: color-mix(in srgb, var(--t1) 9%, transparent);
+  --console-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 12%, transparent);
+}
+.is-light .focus-page {
+  --console-glass: color-mix(in srgb, var(--s1) 84%, transparent);
+  --console-glass-low: color-mix(in srgb, var(--s1) 68%, transparent);
+  --console-highlight: color-mix(in srgb, var(--s1) 94%, transparent);
+  --console-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 8%, transparent);
+}
+.focus-aurora {
+  position: absolute;
+  z-index: 0;
+  left: -12%;
+  width: 124%;
+  height: 350px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 30% 38%, var(--acc-soft), transparent 58%),
+    radial-gradient(ellipse at 78% 58%, var(--acc-glow), transparent 54%);
+  opacity: 0.55;
+  animation: focus-aurora 24s ease-in-out infinite alternate;
+}
+.aurora-a { top: -100px; }
+.aurora-b { top: 210px; opacity: 0.28; animation-direction: alternate-reverse; }
+.is-light .focus-aurora { opacity: 0.2; }
+@keyframes focus-aurora {
+  from { transform: translate3d(-3%, -2%, 0); }
+  to { transform: translate3d(3%, 2%, 0); }
+}
+.glass-card,
+.timer-card {
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  background:
+    linear-gradient(125deg, var(--console-highlight), transparent 34%),
+    linear-gradient(155deg, var(--console-glass), var(--console-glass-low));
+  box-shadow: var(--console-shadow), inset 0 1px 0 var(--console-highlight);
+}
 
 .focus-main {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -358,10 +408,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 16px 14px 18px;
-  background: var(--s1);
-  border: 1px solid var(--bd);
-  border-radius: var(--r-lg);
+  padding: 18px 16px 18px;
+  overflow: hidden;
 }
 .eyebrow {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -370,16 +418,45 @@ onUnmounted(() => {
   color: var(--t3);
 }
 
+.timer-dial {
+  position: relative;
+  width: min(276px, 75vw);
+  height: min(276px, 75vw);
+  margin: 12px 0 2px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--bd);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 36% 25%, var(--console-highlight), transparent 48%),
+    radial-gradient(circle at 50% 55%, var(--acc-soft), transparent 68%),
+    linear-gradient(145deg, var(--console-glass), var(--console-glass-low));
+  box-shadow: var(--console-shadow), inset 0 1px 0 var(--console-highlight);
+}
+.dial-glow {
+  position: absolute;
+  inset: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 55%, var(--acc-soft) 72%, transparent 75%);
+  opacity: 0.48;
+  pointer-events: none;
+  animation: dial-breathe 2.4s ease-in-out infinite;
+}
+.dial-glow.live { opacity: 0.85; animation-duration: 1.8s; }
+.dial-inner { position: absolute; inset: 10px; border: 1px solid var(--bd); border-radius: 50%; pointer-events: none; }
+@keyframes dial-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.985); }
+  50% { opacity: 0.85; transform: scale(1); }
+}
 .ring {
   position: relative;
-  width: min(252px, 68vw);
-  height: min(252px, 68vw);
-  margin: 10px 0 4px;
+  width: 88%;
+  height: 88%;
   border-radius: 50%;
   display: grid;
   place-items: center;
   background: var(--s3);
-  box-shadow: 0 0 34px var(--acc-soft);
+  box-shadow: 0 0 28px var(--acc-soft);
 }
 .ring-half { position: absolute; top: 0; width: 50%; height: 100%; overflow: hidden; }
 .ring-half.right { right: 0; }
@@ -401,7 +478,7 @@ onUnmounted(() => {
   width: 82%;
   height: 82%;
   border-radius: 50%;
-  background: var(--s1);
+  background: linear-gradient(145deg, var(--console-glass), var(--console-glass-low));
   box-shadow: inset 0 0 0 1px var(--bd);
   display: flex;
   flex-direction: column;
@@ -432,12 +509,13 @@ onUnmounted(() => {
   margin-top: 14px;
 }
 .preset {
-  height: 34px;
-  min-width: 60px;
+  height: 38px;
+  min-width: 62px;
   padding: 0 14px;
   border-radius: 999px;
   border: 1px solid var(--bd);
-  background: var(--s2);
+  background: linear-gradient(145deg, var(--console-glass), var(--console-glass-low));
+  box-shadow: inset 0 1px 0 var(--console-highlight);
   color: var(--t2);
   display: flex;
   align-items: center;
@@ -447,21 +525,41 @@ onUnmounted(() => {
 }
 .preset:active { transform: scale(0.97); }
 .preset.on {
-  background: var(--acc-soft);
-  border-color: var(--bd-strong);
-  color: var(--acc);
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-ink);
+  box-shadow: 0 5px 16px var(--acc-soft), inset 0 1px 0 var(--console-highlight);
+  animation: preset-pop 260ms var(--ease-out);
+}
+@keyframes preset-pop {
+  0% { transform: scale(0.94); }
+  65% { transform: scale(1.035); }
+  100% { transform: scale(1); }
 }
 .preset-n { font-size: 12px; font-weight: 600; }
 .preset-u { font-size: 9px; color: var(--t3); }
-.preset.on .preset-u { color: var(--acc); }
+.preset.on .preset-u { color: var(--acc-ink); opacity: 0.75; }
 
 .timer-btns {
   display: flex;
   gap: 10px;
   width: 100%;
-  max-width: 320px;
-  margin-top: 14px;
+  max-width: 340px;
+  margin-top: 16px;
 }
+.timer-primary {
+  border: 1px solid color-mix(in srgb, var(--acc) 78%, var(--t1));
+  background: linear-gradient(110deg, color-mix(in srgb, var(--acc) 82%, var(--bg)), var(--acc) 52%, color-mix(in srgb, var(--acc) 76%, var(--t1)));
+  color: var(--acc-ink);
+  box-shadow: 0 10px 24px var(--acc-soft), inset 0 1px 0 var(--console-highlight);
+  font-weight: 700;
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+.timer-primary:active,
+.timer-primary.is-press { transform: scale(0.97); opacity: 0.96; background: linear-gradient(110deg, color-mix(in srgb, var(--acc) 82%, var(--bg)), var(--acc) 52%, color-mix(in srgb, var(--acc) 76%, var(--t1))); }
+.timer-btns .timer-primary { flex: 1.7; min-height: 52px; height: 52px; border-radius: 17px; font-size: 15px; }
+.timer-btns .timer-reset { min-height: 52px; height: 52px; border: 1px solid var(--bd-strong); border-radius: 17px; background: var(--console-glass-low); color: var(--t2); }
+.timer-reset:active { background: var(--acc-soft); }
 
 .task-pick {
   display: flex;
@@ -470,11 +568,10 @@ onUnmounted(() => {
   width: 100%;
   margin-top: 16px;
   padding: 13px 14px;
-  border-radius: var(--r-md);
-  background: var(--s2);
-  border: 1px solid var(--bd);
+  transition: transform 120ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
 }
-.task-pick:active { border-color: var(--bd-strong); }
+.task-pick:hover { transform: translateY(-1px); border-color: var(--bd-strong); }
+.task-pick:active { transform: scale(0.99); border-color: var(--bd-strong); }
 .task-pick-main {
   flex: 1;
   min-width: 0;
@@ -513,7 +610,7 @@ onUnmounted(() => {
   justify-content: space-between;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1.4px;
+  letter-spacing: 0.65px;
   color: var(--t3);
   padding: 0 4px;
   margin: 18px 0 8px;
@@ -532,12 +629,10 @@ onUnmounted(() => {
   gap: 9px;
   padding: 12px 13px;
   margin-bottom: 8px;
-  border-radius: var(--r-md);
-  background: var(--s1);
-  border: 1px solid var(--bd);
-  transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+  transition: transform 120ms ease-out, border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
 }
-.queue-item:active { transform: scale(0.995); }
+.queue-item:hover { transform: translateY(-1px); border-color: var(--bd-strong); }
+.queue-item:active { transform: scale(0.99); }
 .queue-item.on {
   border-color: var(--bd-strong);
   background: var(--acc-soft);
@@ -570,23 +665,30 @@ onUnmounted(() => {
   gap: 9px;
 }
 .statbox {
-  padding: 12px;
-  border-radius: var(--r-md);
-  background: var(--s1);
+  min-width: 0;
+  padding: 15px 12px;
+  border-radius: 18px;
+  background:
+    linear-gradient(125deg, var(--console-highlight), transparent 40%),
+    linear-gradient(155deg, var(--console-glass), var(--console-glass-low));
   border: 1px solid var(--bd);
+  box-shadow: var(--console-shadow), inset 0 1px 0 var(--console-highlight);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 .stat-v {
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.1;
-  color: var(--acc);
+  color: var(--t1);
+  font-size: 28px;
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
 }
 .stat-l {
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   color: var(--t3);
 }
 .cum {
@@ -728,14 +830,20 @@ onUnmounted(() => {
 .done-t { flex: 1; min-width: 0; font-size: 11.5px; color: var(--t2); }
 .done-btn {
   flex: 0 0 auto;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
-  background: var(--acc);
-  color: var(--acc-ink);
   font-size: 11.5px;
-  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-aurora, .dial-glow { display: none; }
+}
+@media (max-width: 420px) {
+  .timer-card { padding: 16px 12px; }
+  .timer-dial { width: min(264px, 74vw); height: min(264px, 74vw); }
+  .done-row { flex-wrap: wrap; }
+  .done-btn { width: 100%; justify-content: center; }
 }
 </style>

@@ -31,6 +31,23 @@ const lastSyncText = computed(() => {
   return mins < 1 ? '刚刚' : `${mins} 分钟前`
 })
 const localOnly = computed(() => isLocalDomain())
+const online = computed(() => localOnly.value || currentDevice.value?.online === true)
+const todayFocusMinutes = computed(() => {
+  const day = new Date()
+  day.setHours(0, 0, 0, 0)
+  return data.value.focus
+    .filter((session) => session.startedAt >= day.getTime())
+    .reduce((sum, session) => sum + session.minutes, 0)
+})
+const statusText = computed(() => {
+  if (localOnly.value) return '本机存储'
+  return online.value ? '设备在线' : '设备离线'
+})
+const statusSubtitle = computed(() => {
+  if (localOnly.value) return '本地域不联网，任务、笔记与专注始终可用'
+  if (!online.value) return '当前离线，任务、笔记与专注仍可在本机使用'
+  return '设备链路在线，本地数据可与工作台保持同步'
+})
 
 /** 本地域 → 上传到某台设备（只增不覆盖） */
 function uploadTo(): void {
@@ -138,8 +155,56 @@ function placeholder(text: string): void {
 <template>
   <WorkShell active="mine" title="我的" :sub="`${deviceName()} · M1 本地版`">
     <view class="mine-page">
+      <view class="mine-aurora aurora-a" />
+      <view class="mine-aurora aurora-b" />
+
+      <!-- 当前域控制台摘要：只读现有数据，不新增设备或数据层状态。 -->
+      <view class="console-card fb-enter-card">
+        <view class="console-top">
+          <view class="domain-mark"><text class="mono">{{ localOnly ? 'L' : 'M' }}</text></view>
+          <view class="domain-main">
+            <view class="domain-line">
+              <text class="domain-name">{{ deviceName() }}</text>
+              <text class="domain-badge">{{ localOnly ? '本地域' : '当前设备' }}</text>
+            </view>
+            <text class="domain-sub mono">{{ localOnly ? 'LOCAL DOMAIN / OFFLINE FIRST' : (currentDevice?.sub || 'DEVICE DOMAIN / DSH LINK') }}</text>
+          </view>
+          <view class="domain-status" :class="{ off: !online }">
+            <view class="status-beacon"><view v-if="online" class="status-radar" /><view class="status-core" /></view>
+            <text>{{ statusText }}</text>
+          </view>
+        </view>
+        <view class="console-stats">
+          <view class="console-stat">
+            <text class="console-value mono">{{ stats.total }}</text>
+            <text class="console-label">任务数</text>
+          </view>
+          <view class="console-stat">
+            <text class="console-value mono">{{ data.notes.length }}</text>
+            <text class="console-label">笔记数</text>
+          </view>
+          <view class="console-stat">
+            <text class="console-value mono">{{ todayFocusMinutes }}</text>
+            <text class="console-label">今日专注分钟</text>
+          </view>
+        </view>
+        <view class="console-foot">
+          <text class="console-caption">{{ statusSubtitle }}</text>
+          <text class="console-live mono">{{ localOnly ? 'LOCAL' : (online ? 'LIVE' : 'CACHED') }}</text>
+        </view>
+      </view>
+
+      <view v-if="localOnly" class="local-card fb-enter-card fb-i-1">
+        <view class="local-icon"><text>▣</text></view>
+        <view class="local-copy">
+          <text class="local-title">本地域 · 不联网</text>
+          <text class="local-desc">内容只保存在本机，可只增不覆盖地上传到设备</text>
+        </view>
+        <view class="local-upload fb-press" @tap="uploadTo"><text>上传到设备</text><text class="local-arrow">↗</text></view>
+      </view>
+
       <!-- 同步状态（M2 占位，但仍展示真实的待推/冲突数） -->
-      <view class="sync-row" @tap="panelOpen = true">
+      <view class="sync-row glass-card fb-enter-card fb-i-2" @tap="panelOpen = true">
         <view class="sync-icon"><text>⇅</text></view>
         <view class="sync-main">
           <view class="sync-t">
@@ -156,8 +221,8 @@ function placeholder(text: string): void {
 
       <!-- 外观 / 同步 / 数据 -->
       <view class="sect"><text>设置</text><text class="sect-n">即时生效</text></view>
-      <view class="group">
-        <view class="row">
+      <view class="group glass-card fb-enter-card fb-i-3">
+        <view class="row tap">
           <view class="row-main">
             <text class="row-t">主题皮肤</text>
             <text class="row-d">MOSS 冷青绿 / 550W 待机红 · 同源令牌</text>
@@ -172,7 +237,7 @@ function placeholder(text: string): void {
           </view>
         </view>
 
-        <view class="row">
+        <view class="row tap">
           <view class="row-main">
             <text class="row-t">明暗</text>
             <text class="row-d">浅色下扫描线与发光自动关闭</text>
@@ -208,7 +273,7 @@ function placeholder(text: string): void {
 
       <!-- 旧页入口 -->
       <view class="sect"><text>DSH Link 旧页</text><text class="sect-n">设备 / 会话</text></view>
-      <view class="group">
+      <view class="group glass-card fb-enter-card fb-i-4">
         <view class="row tap" @tap="go('/pages/index/index', '设备配对')">
           <view class="row-main">
             <text class="row-t">设备配对</text>
@@ -263,108 +328,120 @@ function placeholder(text: string): void {
 </template>
 
 <style lang="scss" scoped>
-.mine-page { padding-top: 2px; }
-
-.device-card {
-  padding: 16px;
-  border-radius: var(--r-lg);
-  border: 1px solid var(--bd);
-  background: linear-gradient(135deg, var(--s1) 58%, var(--acc-soft));
-}
-.dc-top { display: flex; align-items: center; gap: 12px; }
-.dc-av {
+.mine-page {
   position: relative;
-  width: 48px;
-  height: 48px;
-  flex: 0 0 48px;
+  padding-top: 2px;
+  --console-glass: color-mix(in srgb, var(--s1) 80%, transparent);
+  --console-glass-low: color-mix(in srgb, var(--s2) 62%, transparent);
+  --console-highlight: color-mix(in srgb, var(--t1) 9%, transparent);
+  --console-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 12%, transparent);
+}
+.is-light .mine-page {
+  --console-glass: color-mix(in srgb, var(--s1) 84%, transparent);
+  --console-glass-low: color-mix(in srgb, var(--s1) 68%, transparent);
+  --console-highlight: color-mix(in srgb, var(--s1) 94%, transparent);
+  --console-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 8%, transparent);
+}
+.mine-aurora {
+  position: absolute;
+  z-index: 0;
+  left: -12%;
+  width: 124%;
+  height: 330px;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 28% 36%, var(--acc-soft), transparent 58%),
+    radial-gradient(ellipse at 78% 54%, var(--acc-glow), transparent 55%);
+  opacity: 0.55;
+  animation: mine-aurora 24s ease-in-out infinite alternate;
+}
+.aurora-a { top: -90px; }
+.aurora-b { top: 190px; opacity: 0.28; animation-direction: alternate-reverse; }
+.is-light .mine-aurora { opacity: 0.2; }
+@keyframes mine-aurora {
+  from { transform: translate3d(-3%, -2%, 0); }
+  to { transform: translate3d(3%, 2%, 0); }
+}
+.glass-card,
+.console-card {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  background:
+    linear-gradient(125deg, var(--console-highlight), transparent 34%),
+    linear-gradient(155deg, var(--console-glass), var(--console-glass-low));
+  box-shadow: var(--console-shadow), inset 0 1px 0 var(--console-highlight);
+  transition: transform 120ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
+}
+.console-card { overflow: hidden; padding: 16px 16px 0; }
+.console-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.domain-mark {
+  flex: none;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 15px;
   border: 1px solid var(--bd-strong);
+  border-radius: 14px;
   background: var(--acc-soft);
   color: var(--acc);
+  font-size: 17px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 var(--console-highlight);
 }
-.dc-glyph { font-size: 20px; line-height: 1; }
-.dc-on {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--ok);
-  border: 2px solid var(--s1);
+.domain-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.domain-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.domain-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--t1); font-size: 15px; font-weight: 650; }
+.domain-badge { flex: none; padding: 2px 6px; border: 1px solid var(--bd); border-radius: 5px; background: var(--acc-soft); color: var(--acc); font-size: 8px; letter-spacing: 0.4px; }
+.domain-sub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--t3); font-size: 7.5px; letter-spacing: 0.7px; }
+.domain-status { flex: none; display: flex; align-items: center; gap: 6px; color: var(--acc); font-size: 9px; white-space: nowrap; }
+.domain-status.off { color: var(--t3); }
+.status-beacon { position: relative; width: 10px; height: 10px; display: grid; place-items: center; }
+.status-core { position: relative; z-index: 1; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-radar { position: absolute; width: 9px; height: 9px; border: 1px solid currentColor; border-radius: 50%; animation: mine-radar 1.8s ease-out infinite; }
+@keyframes mine-radar {
+  0% { opacity: 0.5; transform: scale(1); }
+  85%, 100% { opacity: 0; transform: scale(1.9); }
 }
-.dc-on.off { background: var(--t3); }
-.dc-main { flex: 1; min-width: 0; }
-.dc-name-row { display: flex; align-items: center; gap: 8px; }
-.dc-name { font-size: 16px; font-weight: 700; color: var(--t1); }
-.badge {
-  flex: 0 0 auto;
-  font-size: 9.5px;
-  font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-.badge.on { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
-.badge.mut { color: var(--t3); background: var(--s3); }
-.dc-sub {
-  display: block;
-  margin-top: 3px;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 10px;
-  color: var(--t3);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.dc-switch {
-  flex: 0 0 auto;
-  width: auto;
-  min-height: 32px;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 11.5px;
-}
-
-.dc-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-top: 14px;
-}
-.dc-stat {
-  padding: 9px 10px;
-  border-radius: 10px;
-  background: var(--s2);
-  border: 1px solid var(--bd);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.ds-v { font-size: 16px; font-weight: 600; color: var(--acc); }
-.ds-l { font-size: 9px; letter-spacing: 0.08em; color: var(--t3); }
-.dc-foot {
+.console-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 18px; padding: 15px 0; border-top: 1px solid var(--bd); border-bottom: 1px solid var(--bd); background: linear-gradient(90deg, transparent, var(--acc-soft), transparent); }
+.console-stat { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-left: 14px; border-left: 1px solid var(--bd); }
+.console-stat:first-child { padding-left: 0; border-left: 0; }
+.console-value { color: var(--t1); font-size: 28px; font-weight: 550; line-height: 1; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.console-label { color: var(--t3); font-size: 9px; white-space: nowrap; }
+.console-foot { display: flex; align-items: center; gap: 10px; min-height: 47px; }
+.console-caption { flex: 1; min-width: 0; color: var(--t2); font-size: 10px; line-height: 1.6; }
+.console-live { flex: none; color: var(--t3); font-size: 7px; letter-spacing: 1px; }
+.local-card {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 11px;
   margin-top: 12px;
-  font-size: 10px;
-  color: var(--t3);
+  padding: 14px;
+  border: 1px dashed var(--bd-strong);
+  border-radius: 20px;
+  background: linear-gradient(145deg, var(--console-glass-low), var(--acc-soft));
+  box-shadow: var(--console-shadow);
 }
-.dc-dev { margin-left: auto; }
+.local-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--bd); border-radius: 12px; background: var(--acc-soft); color: var(--acc); }
+.local-copy { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
+.local-title { color: var(--t1); font-size: 13px; font-weight: 650; }
+.local-desc { color: var(--t2); font-size: 10px; line-height: 1.6; }
+.local-upload { flex: none; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 13px; border: 1px solid var(--bd-strong); border-radius: 12px; background: var(--acc-soft); color: var(--acc); font-size: 11px; font-weight: 650; }
+.local-arrow { font-size: 14px; }
 
 .sync-row {
   display: flex;
   align-items: center;
   gap: 11px;
-  margin-top: 10px;
-  padding: 12px 14px;
-  border-radius: var(--r-md);
-  background: var(--s1);
-  border: 1px solid var(--bd);
+  margin-top: 12px;
+  padding: 14px;
 }
-.sync-row:active { border-color: var(--bd-strong); }
+.sync-row:hover { transform: translateY(-1px); border-color: var(--bd-strong); }
+.sync-row:active { transform: scale(0.99); border-color: var(--bd-strong); }
 .sync-icon {
   width: 32px;
   height: 32px;
@@ -402,10 +479,12 @@ function placeholder(text: string): void {
   align-items: center;
   justify-content: space-between;
   padding: 0 4px;
-  margin: 18px 0 8px;
+  position: relative;
+  z-index: 1;
+  margin: 20px 0 9px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 1.4px;
+  letter-spacing: 0.65px;
   color: var(--t3);
 }
 .sect-n {
@@ -413,22 +492,19 @@ function placeholder(text: string): void {
   font-size: 9.5px;
   letter-spacing: 0;
 }
-.group {
-  border: 1px solid var(--bd);
-  border-radius: var(--r-lg);
-  background: var(--s1);
-  overflow: hidden;
-}
+.group { overflow: hidden; }
 .row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 56px;
-  padding: 11px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--bd);
+  transition: transform 120ms ease-out, background-color 160ms ease-out;
 }
 .row:last-child { border-bottom: 0; }
-.row.tap:active { background: var(--s2); }
+.row.tap:hover { background: var(--acc-soft); transform: translateY(-1px); }
+.row.tap:active { background: var(--acc-soft); transform: scale(0.99); }
 .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .row-t { font-size: 13px; font-weight: 600; color: var(--t1); }
 .row-d { font-size: 10px; line-height: 1.55; color: var(--t3); }
@@ -452,7 +528,7 @@ function placeholder(text: string): void {
   border-radius: 7px;
   font-size: 10.5px;
   color: var(--t2);
-  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+  transition: transform 90ms ease-out, background-color 160ms var(--ease-out), color 160ms var(--ease-out), border-color 160ms var(--ease-out);
 }
 .seg-i.on {
   background: var(--acc);
@@ -461,6 +537,8 @@ function placeholder(text: string): void {
 }
 
 .foot-note {
+  position: relative;
+  z-index: 1;
   margin-top: 14px;
   padding: 14px;
   border-radius: var(--r-md);
@@ -471,9 +549,20 @@ function placeholder(text: string): void {
 }
 
 @media (min-width: 820px) {
-  .device-card { padding: 18px; }
-  .dc-stats { gap: 10px; }
-  .row { padding: 12px 16px; }
+  .console-card { padding: 20px 20px 0; }
+  .console-stats { margin-top: 22px; }
+  .row { padding: 13px 16px; }
+}
+@media (max-width: 420px) {
+  .console-card { padding: 14px 14px 0; }
+  .console-top { flex-wrap: wrap; }
+  .domain-status { margin-left: 53px; margin-top: -5px; }
+  .console-value { font-size: 26px; }
+  .local-copy { min-width: calc(100% - 49px); }
+  .local-upload { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mine-aurora, .status-radar { display: none; }
 }
 .ov {
   position: fixed;
