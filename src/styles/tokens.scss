@@ -12,7 +12,15 @@
  * 为什么把变量挂在页面根节点而不是 :root：
  * uni-app 在 App 端没有真正的 :root，且页面切换时根节点会重建，
  * 挂在页面根上能保证"换皮肤即时生效且不串页"。
+ *
+ * ── 关于纹理背景 ─────────────────────────────────────────────────────
+ * 卡片背景图由 tools/moss-render/gen-tex.py 按本文件的色值生成，
+ * 每个皮肤 × 明暗各一套。改动这里的颜色后必须重跑生成器，
+ * 否则图和令牌会对不上（gen-tex.py 里的 THEMES 是同一份真相的副本）。
  */
+
+/* 纹理资源路径。uni-app 的静态资源在 H5 与 App 端都从根路径取。 */
+$tex-root: '/static/moss/tex';
 
 .dsh {
   /* ── MOSS / 深色（默认） ─────────────────────────────────────────── */
@@ -47,6 +55,32 @@
   --danger-bd: rgba(255, 92, 77, 0.42);
   --veil-opacity: 0.38;
   --glow-on: 1;
+
+  /* ── 纹理背景（图片本体在静态目录，这里只放引用与强度）─────────────
+   *
+   * 三个角色对应三类卡片：
+   *   --tex-card  普通卡片（笔记 / 资讯 / 看板列 / 设置组）
+   *   --tex-hero  主视觉卡（今天页大日期卡 / 我的页控制台卡 / 设备页状态台）
+   *   --tex-amb   页面环境层（整页底纹）
+   *
+   * 强度不是烤进图片里的，而是由 --tex-*-op 控制：
+   * 同一张图要能被不同尺寸、不同底色的卡片复用，
+   * 强度烤进图片就只能一图一用，包体会翻倍。
+   *
+   * --tex-*-op 的取值不是随手定的：它由 tools/moss-render/check-tex.py
+   * 按「玻璃层盖在纹理上」的真实图层模型算出，约束是
+   * 正文色 --t1 在文字区 ≥ 4.5:1，且任何文字色相对无纹理基线的
+   * 劣化 ≤ 35%。改这个值必须重跑校验。
+   */
+  --tex-card: url('#{$tex-root}/card-moss-dark.webp');
+  --tex-hero: url('#{$tex-root}/hero-moss-dark.webp');
+  --tex-amb: url('#{$tex-root}/amb-moss-dark.webp');
+  --tex-card-op: 0.85;
+  --tex-hero-op: 1;
+  --tex-amb-op: 0.4;
+  /* 纹理层的定位：图案在图片右下角，卡片上也要落在右下角 */
+  --tex-pos: 100% 100%;
+  --tex-size: cover;
 
   /* 尺寸与节奏 */
   --r-sm: 8px;
@@ -130,6 +164,11 @@
   --st-done-soft: rgba(21, 128, 61, 0.12);
   --danger-soft: rgba(255, 59, 47, 0.12);
   --danger-bd: rgba(255, 59, 47, 0.42);
+
+  /* 550W 皮肤换一套纹理图（热裂纹 / 警示斜纹），深色底 */
+  --tex-card: url('#{$tex-root}/card-550w-dark.webp');
+  --tex-hero: url('#{$tex-root}/hero-550w-dark.webp');
+  --tex-amb: url('#{$tex-root}/amb-550w-dark.webp');
 }
 
 /* ── MOSS / 浅色 ───────────────────────────────────────────────────── */
@@ -159,6 +198,15 @@
   /* 亮底上"光"会变成脏污：扫描线与发光一律关掉 */
   --veil-opacity: 0;
   --glow-on: 0;
+
+  /* 浅色底换一套纹理图：同一构图，但压到极低不透明度，只留质感不抢内容 */
+  --tex-card: url('#{$tex-root}/card-moss-light.webp');
+  --tex-hero: url('#{$tex-root}/hero-moss-light.webp');
+  --tex-amb: url('#{$tex-root}/amb-moss-light.webp');
+  /* 浅底上纹理更容易和文字打架，整体再压一档 */
+  --tex-card-op: 0.62;
+  --tex-hero-op: 0.7;
+  --tex-amb-op: 0.32;
 }
 
 /* ── 550W / 浅色 ───────────────────────────────────────────────────── */
@@ -191,6 +239,14 @@
   --st-done-soft: rgba(21, 115, 71, 0.12);
   --danger-soft: rgba(180, 49, 31, 0.1);
   --danger-bd: rgba(180, 49, 31, 0.36);
+
+  /* 550W + 浅色：暖米底上的赤陶裂纹 */
+  --tex-card: url('#{$tex-root}/card-550w-light.webp');
+  --tex-hero: url('#{$tex-root}/hero-550w-light.webp');
+  --tex-amb: url('#{$tex-root}/amb-550w-light.webp');
+  --tex-card-op: 0.62;
+  --tex-hero-op: 0.7;
+  --tex-amb-op: 0.32;
 }
 
 /* 低端机降级：关掉噪点与呼吸，扫描线减半（见 docs/05 §6） */

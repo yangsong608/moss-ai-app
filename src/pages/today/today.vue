@@ -239,8 +239,6 @@ function addQuick(e?: any): void {
 
 /* ── 清单 / 看板 / 历史 / 筛选 ─────────────────────────────────────── */
 
-type TaskView = 'list' | 'board'
-const taskView = ref<TaskView>('list')
 
 type FilterMode = 'all' | 'high' | 'sub'
 const filterMode = ref<FilterMode>('all')
@@ -329,21 +327,6 @@ function isCrossDay(t: Task): boolean {
   return spanLabel(t) !== ''
 }
 
-interface BoardCol {
-  key: TaskStatus
-  label: string
-  items: Task[]
-}
-
-const board = computed<BoardCol[]>(() => {
-  const live = filtered.value.filter((t) => !t.done)
-  return [
-    { key: 'next', label: '下一步', items: live.filter((t) => t.status === 'next') },
-    { key: 'doing', label: '进行中', items: live.filter((t) => t.status === 'doing') },
-    { key: 'waiting', label: '等待中', items: live.filter((t) => t.status === 'waiting') },
-  ]
-})
-
 interface HistoryGroupView {
   key: 'today' | 'week' | 'earlier'
   label: string
@@ -425,6 +408,86 @@ function goCard(delta: number): void {
   haptic('light')
 }
 
+/* ── 卡片内联快捷编辑：备注 / 标签 / 优先级（不弹框） ─────────────── */
+
+const noteEditing = ref(false)
+const noteDraft = ref('')
+const tagEditing = ref(false)
+const tagDraft = ref('')
+const confirmDelId = ref('')
+
+const PRI_CYCLE: Task['pri'][] = ['normal', 'high', 'low']
+const PRI_LABEL: Record<Task['pri'], string> = { normal: '普通', high: '高', low: '低' }
+
+function startNote(t: Task): void {
+  noteEditing.value = true
+  noteDraft.value = t.note
+}
+
+function saveNote(t: Task): void {
+  const v = noteDraft.value.trim()
+  updateTask(t.id, { note: v })
+  noteEditing.value = false
+  haptic('light')
+  toast(v.length > 0 ? '备注已保存' : '备注已清空')
+}
+
+function cyclePri(t: Task): void {
+  const i = PRI_CYCLE.indexOf(t.pri)
+  updateTask(t.id, { pri: PRI_CYCLE[(i + 1) % PRI_CYCLE.length] ?? 'normal' })
+  haptic('light')
+}
+
+function commitTag(t: Task): void {
+  const v = tagDraft.value.trim().replace(/^#/, '')
+  tagEditing.value = false
+  tagDraft.value = ''
+  if (v.length === 0) return
+  if (t.tags.includes(v)) return
+  updateTask(t.id, { tags: [...t.tags, v] })
+  haptic('light')
+}
+
+function removeTag(t: Task, tag: string): void {
+  updateTask(t.id, { tags: t.tags.filter((x) => x !== tag) })
+  haptic('light')
+}
+
+/** 第一次点变成「确认删除」，2.6s 内再点才真删 */
+function askDeleteCard(t: Task): void {
+  if (confirmDelId.value === t.id) {
+    confirmDelId.value = ''
+    removeTask(t.id)
+    toast('已删除任务')
+    haptic('medium')
+    return
+  }
+  confirmDelId.value = t.id
+  setTimeout(() => { if (confirmDelId.value === t.id) confirmDelId.value = '' }, 2600)
+  haptic('light')
+}
+
+/* ── 完成彩蛋：纸屑爆开 + 卡片收束 ─────────────────────────────────── */
+
+interface Particle { dx: number; dy: number; rot: number; delay: number; color: string }
+
+const burst = ref(false)
+const particles = ref<Particle[]>([])
+
+function celebrate(): void {
+  if (stateLiteOrReduced()) return
+  const colors = ['var(--acc)', 'var(--st-doing)', 'var(--st-done)', 'var(--warn)']
+  particles.value = Array.from({ length: 18 }, (_, i) => ({
+    dx: Math.round((Math.random() - 0.5) * 200),
+    dy: -Math.round(30 + Math.random() * 130),
+    rot: Math.round(Math.random() * 420 - 210),
+    delay: i * 14,
+    color: colors[i % colors.length] ?? 'var(--acc)',
+  }))
+  burst.value = true
+  setTimeout(() => { burst.value = false; particles.value = [] }, 950)
+}
+
 let touchY = 0
 function onCardTouStart(e: any): void {
   touchY = e?.touches?.[0]?.clientY ?? 0
@@ -434,12 +497,6 @@ function onCardTouEnd(e: any): void {
   const dy = y - touchY
   if (Math.abs(dy) < 36) return
   goCard(dy < 0 ? 1 : -1)
-}
-
-function setView(v: TaskView): void {
-  if (taskView.value === v) return
-  taskView.value = v
-  haptic('light')
 }
 
 function cycleFilter(): void {
@@ -478,12 +535,13 @@ function toggle(id: string): void {
   const task = data.value.tasks.find((x) => x.id === id)
   if (task === undefined || completingIds.value.has(id) || leavingIds.value.has(id)) return
   haptic('medium')
-  if (task.done || taskView.value === 'board') {
+  if (task.done) {
     toggleTask(id)
-    toast(task.done ? '已恢复为未完成' : '已完成 · 待同步到 DSH')
+    toast('已恢复为未完成')
     return
   }
-  // 普通清单先显示打勾，再让行淡出；已完成组只切换静态状态，不播退出。
+  // 先播打勾 + 彩蛋，再真正切换完成态
+  celebrate()
   markFeedback(completingIds, id)
   afterFeedback(() => {
     toggleTask(id)
@@ -678,23 +736,24 @@ function doClear(): void {
         </view>
       </view>
 
-      <!-- 视图切换 + 筛选 -->
+      <!-- 只保留台历视图；右侧留筛选 -->
       <view class="tools">
-        <view class="seg">
-          <view class="seg-btn" :class="{ on: taskView === 'list' }" @tap="setView('list')"><text>清单</text></view>
-          <view class="seg-btn" :class="{ on: taskView === 'board' }" @tap="setView('board')"><text>看板</text></view>
-        </view>
+        <view class="sp" />
         <view class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
           <text>{{ FILTER_LABEL[filterMode] }}</text>
         </view>
       </view>
 
       <!-- 清单：只当日 + 按时间排序 + 台历翻页卡片 -->
-      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="calwrap">
+      <view :key="`list-${filterMode}`" class="calwrap">
         <view class="calbar">
           <view class="caltoggle">
-            <view class="ct-btn" :class="{ on: cardMode }" @tap="cardMode = true"><text>翻页</text></view>
-            <view class="ct-btn" :class="{ on: !cardMode }" @tap="cardMode = false"><text>列表</text></view>
+            <view class="ct-btn" :class="{ on: cardMode }" role="button" aria-label="翻页卡片" @tap="cardMode = true">
+              <text class="ct-ic">▤</text>
+            </view>
+            <view class="ct-btn" :class="{ on: !cardMode }" role="button" aria-label="列表" @tap="cardMode = false">
+              <text class="ct-ic">☰</text>
+            </view>
           </view>
           <text class="calbar-n mono">{{ todayCards.length }} 项 · 按时间</text>
         </view>
@@ -729,26 +788,94 @@ function doClear(): void {
               @longpress="openRowMenu(currentCard)"
             >
               <view class="fc-top">
-                <text class="fc-when mono" :class="{ due: isDue(currentCard) }">{{ currentCard.when }}</text>
-                <text class="fc-st" :style="statusChipStyle(currentCard)">{{ statusLabel(currentCard) }}</text>
-                <view class="sp" />
-                <view class="tmenu" @tap.stop="openRowMenu(currentCard)"><text class="tmenu-g">⋯</text></view>
+              <text class="fc-when mono" :class="{ due: isDue(currentCard) }">{{ currentCard.when }}</text>
+              <text class="fc-st" :style="statusChipStyle(currentCard)">{{ statusLabel(currentCard) }}</text>
+              <!-- 优先级：点一下循环切换 -->
+              <view class="fc-pri" :class="currentCard.pri" @tap.stop="cyclePri(currentCard)">
+                <text class="fc-pri-dot" />
+                <text>{{ PRI_LABEL[currentCard.pri] }}</text>
               </view>
-              <text class="fc-title">{{ currentCard.title }}</text>
-              <view class="fc-meta">
-                <text v-if="isCrossDay(currentCard)" class="tmi span mono">{{ spanLabel(currentCard) }}</text>
-                <text v-if="currentCard.sub.length > 0" class="tmi mono">{{ subText(currentCard) }}</text>
-                <text v-for="tag in currentCard.tags" :key="tag" class="tmi">#{{ tag }}</text>
-                <text v-if="currentCard.pri === 'high'" class="tmi high">高优先</text>
-              </view>
-              <view class="fc-acts">
-                <view class="fc-done" @tap.stop="toggle(currentCard.id)">
-                  <text class="fc-cg" />
-                  <text>完成</text>
+              <view class="sp" />
+              <view class="tmenu" @tap.stop="openRowMenu(currentCard)"><text class="tmenu-g">⋯</text></view>
+            </view>
+
+            <text class="fc-title">{{ currentCard.title }}</text>
+
+            <!-- 备注：点开就地编辑 -->
+            <view class="fc-note">
+              <template v-if="noteEditing">
+                <textarea
+                  v-model="noteDraft"
+                  class="fc-note-in"
+                  placeholder="写点说明…"
+                  placeholder-class="ph"
+                  :auto-height="true"
+                  :focus="noteEditing"
+                />
+                <view class="fc-note-acts">
+                  <view class="fc-mini ghost" @tap.stop="noteEditing = false"><text>取消</text></view>
+                  <view class="fc-mini" @tap.stop="saveNote(currentCard)"><text>保存</text></view>
                 </view>
-                <text class="fc-hint">上滑/下滑翻页</text>
+              </template>
+              <view v-else class="fc-note-ro" @tap.stop="startNote(currentCard)">
+                <text v-if="currentCard.note" class="fc-note-t">{{ currentCard.note }}</text>
+                <text v-else class="fc-note-ph">＋ 添加备注</text>
               </view>
             </view>
+
+            <!-- 标签：就地增删 -->
+            <view class="fc-tags">
+              <view v-for="tag in currentCard.tags" :key="tag" class="fc-tag" @tap.stop="removeTag(currentCard, tag)">
+                <text>#{{ tag }}</text>
+                <text class="fc-tag-x">✕</text>
+              </view>
+              <view v-if="tagEditing" class="fc-tag-in-wrap">
+                <input
+                  v-model="tagDraft"
+                  class="fc-tag-in"
+                  placeholder="标签名"
+                  placeholder-class="ph"
+                  :focus="tagEditing"
+                  confirm-type="done"
+                  @confirm="commitTag(currentCard)"
+                  @blur="commitTag(currentCard)"
+                />
+              </view>
+              <view v-else class="fc-tag-add" @tap.stop="tagEditing = true"><text>＋ 标签</text></view>
+              <text v-if="currentCard.sub.length > 0" class="tmi mono">{{ subText(currentCard) }}</text>
+            </view>
+
+            <view class="fc-acts">
+              <view class="fc-done" @tap.stop="toggle(currentCard.id)">
+                <text class="fc-cg" />
+                <text>完成</text>
+              </view>
+              <view
+                class="fc-del"
+                :class="{ armed: confirmDelId === currentCard.id }"
+                @tap.stop="askDeleteCard(currentCard)"
+              >
+                <text>{{ confirmDelId === currentCard.id ? '确认删除' : '✕ 删除' }}</text>
+              </view>
+              <text class="fc-hint">上下翻页</text>
+            </view>
+
+            <!-- 彩蛋：完成时纸屑爆开 -->
+            <view v-if="burst" class="burst">
+              <view
+                v-for="(p, i) in particles"
+                :key="i"
+                class="pt"
+                :style="{
+                  '--dx': `${p.dx}px`,
+                  '--dy': `${p.dy}px`,
+                  '--rot': `${p.rot}deg`,
+                  '--delay': `${p.delay}ms`,
+                  background: p.color,
+                }"
+              />
+            </view>
+          </view>
 
             <view v-else class="flipempty fb-empty">
               <text class="fb-empty-icon">☀</text>
@@ -811,35 +938,6 @@ function doClear(): void {
           </view>
         </view>
       </view>
-
-      <!-- 看板 -->
-      <scroll-view v-else-if="taskView === 'board'" :key="`board-${filterMode}`" scroll-x class="board-scroll" :show-scrollbar="false">
-        <view class="board">
-          <view v-for="col in board" :key="col.key" class="bcol">
-            <view class="bh">
-              <view class="bdot" :class="col.key" />
-              <text class="bt">{{ col.label }}</text>
-              <text class="mono bn">{{ col.items.length }}</text>
-            </view>
-            <view
-              v-for="(t, index) in col.items"
-              :key="t.id"
-              class="bcard"
-              :class="[t.pri, statusKeyOf(t), ...taskFeedbackClass(t, index)]"
-              @tap="openTask(t.id)"
-              @longpress="openRowMenu(t)"
-            >
-              <text class="bct">{{ t.title }}</text>
-              <view class="bcm">
-                <text class="bchip mono">{{ t.when }}</text>
-                <text class="devbadge">{{ t.dev }}</text>
-                <view v-if="t.sync" class="syncdot" />
-              </view>
-            </view>
-            <view v-if="col.items.length === 0" class="bcol-empty fb-empty"><text class="fb-empty-icon">＋</text><text>从快速记录新建任务，再在这里推进状态</text></view>
-          </view>
-        </view>
-      </scroll-view>
 
     </view>
 
@@ -1339,6 +1437,121 @@ function doClear(): void {
   box-shadow: -1px -1px 0 color-mix(in srgb, var(--bd-strong) 60%, transparent);
   pointer-events: none;
 }
+
+/* ── 卡片内联快捷编辑 ───────────────────────────────────────────────── */
+.fc-pri {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t2);
+  font-size: 9.5px;
+  flex: 0 0 auto;
+}
+.fc-pri-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--t3); }
+.fc-pri.high { border-color: color-mix(in srgb, var(--danger) 42%, transparent); color: var(--danger); }
+.fc-pri.high .fc-pri-dot { background: var(--danger); }
+.fc-pri.low { color: var(--t3); }
+.fc-pri.low .fc-pri-dot { background: var(--t3); }
+.fc-pri.normal .fc-pri-dot { background: var(--st-doing); }
+
+.fc-note { display: flex; flex-direction: column; gap: 6px; }
+.fc-note-ro {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--bd);
+  background: color-mix(in srgb, var(--s2) 60%, transparent);
+}
+.fc-note-t { font-size: 11.5px; line-height: 1.6; color: var(--t2); }
+.fc-note-ph { font-size: 11px; color: var(--t3); }
+.fc-note-in {
+  width: 100%;
+  min-height: 54px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--bd-strong);
+  background: var(--s1);
+  color: var(--t1);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.fc-note-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.fc-mini {
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: var(--acc-soft);
+  color: var(--acc);
+  font-size: 10px;
+  font-weight: 600;
+}
+.fc-mini.ghost { background: transparent; color: var(--t3); border: 1px solid var(--bd); }
+
+.fc-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--s3);
+  color: var(--t2);
+  font-size: 9.5px;
+}
+.fc-tag-x { font-size: 8px; opacity: 0.55; }
+.fc-tag-add {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--bd-strong);
+  color: var(--t3);
+  font-size: 9.5px;
+}
+.fc-tag-in-wrap { flex: 1 1 90px; min-width: 90px; }
+.fc-tag-in {
+  width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--bd-strong);
+  background: var(--s1);
+  color: var(--t1);
+  font-size: 10px;
+}
+
+.fc-del {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, transparent);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 600;
+}
+.fc-del.armed {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--bg);
+  animation: del-pulse 700ms ease-in-out infinite alternate;
+}
+@keyframes del-pulse { from { opacity: 0.86; } to { opacity: 1; } }
+
+/* ── 完成彩蛋：纸屑 ─────────────────────────────────────────────────── */
+.burst { position: absolute; left: 50%; top: 52%; width: 0; height: 0; pointer-events: none; z-index: 5; }
+.pt {
+  position: absolute;
+  width: 5px;
+  height: 8px;
+  border-radius: 1.5px;
+  opacity: 0;
+  animation: confetti 780ms cubic-bezier(0.22, 1, 0.36, 1) var(--delay, 0ms) forwards;
+}
+@keyframes confetti {
+  0% { opacity: 1; transform: translate3d(0, 0, 0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate3d(var(--dx, 0px), var(--dy, -80px), 0) rotate(var(--rot, 180deg)) scale(0.7); }
+}
+
+.ct-ic { font-size: 12px; line-height: 1; }
 
 /* ── 工具条：翻页 / 列表切换 ── */
 .calbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }

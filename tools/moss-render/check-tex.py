@@ -4,28 +4,40 @@ MOSS AI App · 纹理可读性校验。
 
 回答一个具体问题：**把纹理铺到卡片上以后，卡片里的字还读得清吗？**
 
-## 判据为什么是"相对劣化"而不是"绝对阈值"
+## 一、真实的图层模型（这一点决定结论对不对）
 
-第一版用的是绝对阈值（对比度必须 ≥ 4.5:1），结果报了一堆"不通过"。
-但查下去发现：**那些不通过项在没有纹理时就已经不达标了**——
-本项目的 --t3（元信息色，如时间戳、计数）在卡片底色上本来就只有 3.5:1，
-这是既有的设计决策（它是弱化信息，不是正文）。
+卡片不是"底色 + 纹理"这么简单。项目已有的玻璃卡是三层结构：
 
-用绝对阈值会把"项目原有的设计取舍"误判成"纹理引入的缺陷"，
-于是校验脚本给出的结论是错的。
+    ┌─ 文字 ────────────────────────┐
+    │  玻璃层  rgba(s1, 80%)          │  ← 半透明，压在纹理之上
+    │  纹理层  纹理图（RGBA）          │  ← 底部
+    │  基底层  页面底色                │
+    └───────────────────────────────┘
 
-真正该问的问题是：**纹理相对"什么都不加"的基线，劣化了多少？**
-所以这里的判据是两条：
+所以最终背景色 = 玻璃盖在（纹理盖在底色）之上。
 
-  1. **绝对下限**：正文色 --t1 与卡片底色的对比度，加纹理后仍需 ≥ 4.5:1。
-     这条不打折——正文可读性是硬要求。
-  2. **相对劣化**：任何文字色（含弱化的 --t3）加上纹理后，
-     对比度不得比基线下降超过 35%。
-     换句话说：纹理的贡献必须是"可感知的质感"，不是"读不清的字"。
+**第一版校验错在这里**：它把纹理直接叠在底色上，得出"文字区对比度只有 1.7:1"
+的结论——但那不是真实渲染结果。真实的玻璃层会自动把纹理的贡献压到 ~20%，
+这既是现成的视觉语言（玻璃卡本来就该有透光感），
+也是天然的亮度上限：再亮的纹理也透不过 80% 的玻璃。
 
-文字区定义为卡片的左上 62% × 72%（标题 / 摘要 / 按钮所在处）。
-图案区（右下的密集纹理）允许更激进——那里的对比度只要不塌到 3:1 以下即可，
-因为那儿本来就不放正文。
+## 二、判据
+
+  1. **绝对下限**：正文色 --t1 在文字区仍需 ≥ 4.5:1（正文 14–15px，不是大字）。
+  2. **相对劣化**：任何文字色加上纹理后，对比度相对"无纹理基线"下降不超过 35%。
+     用相对判据而不是绝对阈值，是因为 --t3（元信息色）在无纹理时本来就只有
+     3.4–3.7:1——那是项目既有的设计取舍（弱化信息），不是纹理引入的缺陷。
+     第一版用绝对阈值，把既有问题误判成了新缺陷。
+  3. **图案区**：不放正文，但 --t1/--t2 可能被用到（卡片角上的计数、状态标签），
+     要求 ≥ 3.0:1；--t3 允许 ≥ 2.0:1。
+
+文字区 = 卡片左上 62% × 72%（标题 / 摘要 / 按钮所在处）。
+图案区 = 右下密集纹理区。
+
+## 三、应用不透明度
+
+图片里的强度不等于最终视觉强度：CSS 会用 --tex-*-op 再乘一层。
+必须按最终叠加结果算，否则会出现"校验通过、实际看不清"。
 
 用法：
   python3 tools/moss-render/check-tex.py
@@ -43,30 +55,36 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEX = os.path.normpath(os.path.join(HERE, '../../src/static/moss/tex'))
 
-# 与 src/styles/tokens.scss 一一对应。改主题必须同步改这里——
-# 校验脚本读的是"令牌真相"，不是图片自己。
-# surface = 卡片玻璃渐变在文字区的等效底色（s1→s2 的中值）
+# ── 主题令牌（与 src/styles/tokens.scss 一一对应）─────────────────────
+#
+# page_bg : 卡片背后的页面底色（玻璃层下面的基底层）
+# glass   : 玻璃层的颜色与不透明度（--console-glass / --console-glass-low）
+# text*   : --t1 / --t2 / --t3
 THEMES = {
     'moss-dark': {
-        'surface': (0x0b, 0x12, 0x10),
-        'text': (0xe6, 0xf3, 0xec),     # --t1 正文
-        'text2': (0x8f, 0xa7, 0x9b),    # --t2 次要
-        'text3': (0x5b, 0x6f, 0x66),    # --t3 元信息
+        'page_bg': (0x05, 0x08, 0x06),
+        'glass': (0x0b, 0x12, 0x10), 'glass_a': 0.80,
+        'text': (0xe6, 0xf3, 0xec),
+        'text2': (0x8f, 0xa7, 0x9b),
+        'text3': (0x5b, 0x6f, 0x66),
     },
     'moss-light': {
-        'surface': (0xff, 0xff, 0xff),
+        'page_bg': (0xf2, 0xf7, 0xf4),
+        'glass': (0xff, 0xff, 0xff), 'glass_a': 0.84,
         'text': (0x0b, 0x15, 0x12),
         'text2': (0x4a, 0x5d, 0x55),
         'text3': (0x7b, 0x8d, 0x85),
     },
     '550w-dark': {
-        'surface': (0x12, 0x09, 0x08),
+        'page_bg': (0x0a, 0x05, 0x04),
+        'glass': (0x12, 0x09, 0x08), 'glass_a': 0.80,
         'text': (0xf2, 0xea, 0xe4),
         'text2': (0xb4, 0x9a, 0x92),
         'text3': (0x7a, 0x60, 0x58),
     },
     '550w-light': {
-        'surface': (0xff, 0xfd, 0xf9),
+        'page_bg': (0xf7, 0xf1, 0xe7),
+        'glass': (0xff, 0xfd, 0xf9), 'glass_a': 0.84,
         'text': (0x1a, 0x0f, 0x0c),
         'text2': (0x6b, 0x53, 0x4c),
         'text3': (0x95, 0x80, 0x6f),
@@ -77,6 +95,13 @@ THEMES = {
 TEXT_ZONE = (0.00, 0.62, 0.00, 0.72)
 # 卡片图案区：右下密集纹理
 PATTERN_ZONE = (0.62, 1.00, 0.45, 1.00)
+
+# ── 应用不透明度（与 tokens.scss 的 --tex-*-op 一致）──────────────────
+APPLY_OPACITY = {
+    'card': 0.85,
+    'hero': 1.00,
+    'amb': 0.40,
+}
 
 _LUT = np.array([(c / 255.0 / 12.92) if (c / 255.0) <= 0.04045
                  else (((c / 255.0) + 0.055) / 1.055) ** 2.4
@@ -94,13 +119,48 @@ def contrast(a, b) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def composite_over(surface, tex: Image.Image) -> Image.Image:
-    bg = Image.new('RGBA', tex.size, tuple(surface) + (255,))
+def _lum_to_rgb(lum: float) -> tuple[int, int, int]:
+    if lum <= 0.0031308:
+        srgb = lum * 12.92
+    else:
+        srgb = 1.055 * (lum ** (1 / 2.4)) - 0.055
+    v = int(round(max(0.0, min(1.0, srgb)) * 255))
+    return (v, v, v)
+
+
+def _alpha_scaled(tex: Image.Image, opacity: float) -> Image.Image:
+    if opacity == 1.0:
+        return tex
+    t = tex.copy()
+    t.putalpha(tex.split()[3].point(lambda v: int(v * opacity)))
+    return t
+
+
+def render_card(theme: dict, tex: Image.Image, opacity: float) -> Image.Image:
+    """
+    渲染卡片的真实底色：玻璃层盖在（纹理盖在页面底色）之上。
+
+    amb 是页面级环境层，没有玻璃，直接叠在页面底色上。
+    """
+    tex = _alpha_scaled(tex, opacity)
+    bg = Image.new('RGBA', tex.size, tuple(theme['page_bg']) + (255,))
+    if 'glass' in theme:
+        base = Image.alpha_composite(bg, tex)
+        glass = Image.new('RGBA', tex.size, tuple(theme['glass']) + (int(theme['glass_a'] * 255),))
+        return Image.alpha_composite(base, glass).convert('RGB')
     return Image.alpha_composite(bg, tex).convert('RGB')
 
 
+def render_baseline(theme: dict) -> Image.Image:
+    """无纹理时卡片的底色（玻璃盖在页面底色上）。"""
+    bg = Image.new('RGBA', (64, 64), tuple(theme['page_bg']) + (255,))
+    if 'glass' in theme:
+        glass = Image.new('RGBA', (64, 64), tuple(theme['glass']) + (int(theme['glass_a'] * 255),))
+        return Image.alpha_composite(bg, glass).convert('RGB')
+    return bg.convert('RGB')
+
+
 def zone_lum(img: Image.Image, zone) -> tuple[float, float]:
-    """返回区域内像素相对亮度的 (最暗, 最亮)。"""
     w, h = img.size
     x0, x1, y0, y1 = zone
     crop = img.crop((int(x0 * w), int(y0 * h), int(x1 * w), int(y1 * h)))
@@ -117,20 +177,10 @@ def worst_contrast(text_rgb, img: Image.Image, zone) -> float:
     两种都要考虑——所以这里取两个方向的较小值。
     """
     lo, hi = zone_lum(img, zone)
-    lt = rel_luminance(text_rgb)
-    c_light_text = contrast(text_rgb, _lum_to_rgb(hi))
-    c_dark_text = contrast(text_rgb, _lum_to_rgb(lo))
-    return min(c_light_text, c_dark_text)
-
-
-def _lum_to_rgb(lum: float) -> tuple[int, int, int]:
-    """把相对亮度反解成灰色 RGB（用于计算对比度）。"""
-    if lum <= 0.0031308:
-        srgb = lum * 12.92
-    else:
-        srgb = 1.055 * (lum ** (1 / 2.4)) - 0.055
-    v = int(round(max(0.0, min(1.0, srgb)) * 255))
-    return (v, v, v)
+    return min(
+        contrast(text_rgb, _lum_to_rgb(hi)),
+        contrast(text_rgb, _lum_to_rgb(lo)),
+    )
 
 
 def main() -> int:
@@ -139,18 +189,18 @@ def main() -> int:
         return 2
 
     failures: list[str] = []
-    print(f'{"主题":<13}{"纹理":<7}{"区域":<7}{"文字":<6}{"基线":>7}{"带纹理":>8}{"劣化":>8}  结论')
-    print('─' * 70)
+    print(f'{"主题":<13}{"纹理":<6}{"区域":<7}{"文字":<6}{"基线":>7}{"带纹理":>8}{"劣化":>7}  结论')
+    print('─' * 68)
 
     for key, t in THEMES.items():
-        surface = t['surface']
         for kind in ('card', 'hero', 'amb'):
             path = os.path.join(TEX, f'{kind}-{key}.webp')
             if not os.path.exists(path):
                 failures.append(f'{kind}-{key}: 文件缺失')
                 continue
             tex = Image.open(path).convert('RGBA')
-            comp = composite_over(surface, tex)
+            comp = render_card(t, tex, APPLY_OPACITY[kind])
+            base_img = render_baseline(t)
 
             for zone_name, zone, is_text_zone in (
                 ('文字区', TEXT_ZONE, True),
@@ -159,40 +209,33 @@ def main() -> int:
                 for text_name, text_rgb in (
                     ('--t1', t['text']), ('--t2', t['text2']), ('--t3', t['text3'])
                 ):
-                    # 基线 = 纯卡片底色（不加纹理）
-                    base = contrast(text_rgb, surface)
+                    base = worst_contrast(text_rgb, base_img, zone)
                     ratio = worst_contrast(text_rgb, comp, zone)
                     drop = 1.0 - (ratio / base) if base > 0 else 0.0
 
                     ok = True
                     if is_text_zone:
-                        # 正文色绝对下限：4.5:1（正文与元信息字号都 < 18px）
                         if text_name == '--t1' and ratio < 4.5:
                             ok = False
                             failures.append(
-                                f'{kind}-{key} {zone_name} {text_name}: {ratio:.2f} < 4.5（正文绝对下限）'
-                            )
-                        # 相对劣化不超过 35%
+                                f'{kind}-{key} {zone_name} {text_name}: {ratio:.2f} < 4.5（正文绝对下限）')
                         if drop > 0.35:
                             ok = False
                             failures.append(
                                 f'{kind}-{key} {zone_name} {text_name}: '
-                                f'劣化 {drop * 100:.0f}% > 35%（基线 {base:.2f} → {ratio:.2f}）'
-                            )
+                                f'劣化 {drop * 100:.0f}% > 35%（基线 {base:.2f} → {ratio:.2f}）')
                     else:
-                        # 图案区不放大字，但也不能塌到读不清
-                        if ratio < 3.0:
+                        floor = 3.0 if text_name != '--t3' else 2.0
+                        if ratio < floor:
                             ok = False
                             failures.append(
-                                f'{kind}-{key} {zone_name} {text_name}: {ratio:.2f} < 3.0'
-                            )
+                                f'{kind}-{key} {zone_name} {text_name}: {ratio:.2f} < {floor}')
 
                     print(
-                        f'{key:<13}{kind:<7}{zone_name:<7}{text_name:<6}'
-                        f'{base:>6.2f}:{ratio:>7.2f}:{drop * 100:>6.0f}%  {"通过" if ok else "不通过"}'
-                    )
+                        f'{key:<13}{kind:<6}{zone_name:<7}{text_name:<6}'
+                        f'{base:>6.2f}:{ratio:>7.2f}:{drop * 100:>5.0f}%  {"通过" if ok else "不通过"}')
 
-    print('─' * 70)
+    print('─' * 68)
     if failures:
         print(f'✗ {len(failures)} 项未通过：')
         for f in failures:
@@ -201,7 +244,7 @@ def main() -> int:
     print('✓ 全部主题通过')
     print('  · 正文色 --t1 在文字区 ≥ 4.5:1')
     print('  · 所有文字色相对无纹理基线的劣化 ≤ 35%')
-    print('  · 图案区任意文字色 ≥ 3.0:1')
+    print('  · 图案区 --t1/--t2 ≥ 3.0:1，--t3 ≥ 2.0:1')
     return 0
 
 

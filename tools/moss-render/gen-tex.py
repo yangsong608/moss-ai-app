@@ -2,21 +2,36 @@
 """
 MOSS AI App · 卡片与环境纹理生成器。
 
-为什么是程序化生成而不是 AI 出图：
+## 为什么是程序化生成而不是 AI 出图
+
   1. **配色必须精确对齐设计令牌**（--acc / --s1 / --bg…）。AI 出图的色相不可控，
      一旦和 4 套主题（2 皮肤 × 明暗）都对不齐，界面就会"脏"。
   2. **文字安全区必须可度量**。程序化生成能保证安静区（文字所在区域）的
-     亮度扰动 < 3%，而 AI 出图无法保证（常见问题是纹理里出现高对比硬边，
+     亮度扰动可控，而 AI 出图无法保证（常见问题是纹理里出现高对比硬边，
      压在小标题下面就变成"看不清"）。
   3. **包体**。App 首包预算是 400KB（docs/05 §8），纹理必须能压到几十 KB。
      程序化生成 + WebP 有损压缩（含有损 alpha）可以精确控体积。
 
-产物（src/static/moss/tex/）：
-  card-{skin}-{mode}.webp   卡片纹理（RGBA，图案压在玻璃渐变之上）
-  hero-{skin}-{mode}.webp   主视觉卡纹理（浓度更高、构图更满）
-  amb-{skin}-{mode}.webp    页面环境纹理（稀疏大尺度，压在页面底渐变之上）
+## 分层职责（关键）
 
-主题（skin × mode）：
+图片负责**质感与结构**，强度由 CSS 的不透明度令牌控制（--tex-*-op）。
+两者分开的原因：同一张图要能被不同尺寸、不同底色的卡片复用，
+如果把强度烤进图片，就只能一图一用，包体会翻倍。
+
+## 三种角色
+
+| 角色 | 用在哪 | 特征 |
+|---|---|---|
+| card  | 笔记卡 / 资讯卡 / 看板列 / 设置组 | 图案集中在右下角，安静区留给标题摘要 |
+| hero  | 今天页大日期卡 / 我的页控制台卡 / 设备页状态台 | 密度更高，可占据右半幅 |
+| amb   | 页面级环境层 | 只有雷达弧环与大范围柔光，无细密图案 |
+
+amb 之所以不给密集图案：它铺在**整页**下面，而页面上的散落文字
+（章节标题、页脚说明）位置不可控。整页层必须保证任何位置都读得清，
+所以只留大尺度低对比的弧环与柔光。
+
+## 主题（skin × mode）
+
   moss  : 冷青绿，菌丝/孢子 —— 生物终端
   550w  : 待机红，热裂纹/警示斜纹 —— 工业告警
   dark  : 深底，靠加色发光制造纵深
@@ -49,9 +64,31 @@ OUT = os.path.normpath(os.path.join(HERE, '../../src/static/moss/tex'))
 # 纹理本身是柔和抽象图案，锐度损失看不出来，体积却省一半。
 W_CARD, H_CARD = 720, 448
 W_HERO, H_HERO = 840, 420
-W_AMB, H_AMB = 520, 520
+W_AMB, H_AMB = 640, 640
 
 SS = 2  # 图案绘制时的超采样倍数（抗锯齿）
+
+
+# ── 角色剖面 ────────────────────────────────────────────────────────────
+@dataclass
+class Profile:
+    name: str
+    w: int
+    h: int
+    density: float
+    motif: bool          # 是否画主图案（菌丝/裂纹）
+    hatch: bool          # 是否叠加警示斜纹
+    arcs: bool           # 是否画雷达弧环
+    glow_r: float        # 辉光半径
+    quiet_floor: float   # 安静区的残留系数（0 = 完全干净）
+    cap_bytes: int       # 体积上限
+
+
+PROFILES = {
+    'card': Profile('card', W_CARD, H_CARD, 1.0, True, False, False, 0.44, 0.05, 20_000),
+    'hero': Profile('hero', W_HERO, H_HERO, 1.5, True, True, False, 0.46, 0.05, 26_000),
+    'amb': Profile('amb', W_AMB, H_AMB, 0.9, False, False, True, 0.72, 0.0, 14_000),
+}
 
 
 # ── 主题定义 ────────────────────────────────────────────────────────────
@@ -68,7 +105,6 @@ class Theme:
     sheen: float
     seed: int
     motif_kind: str = 'filament'
-    hatch: bool = False               # 是否带工业警示斜纹
 
 
 THEMES: list[Theme] = [
@@ -76,27 +112,27 @@ THEMES: list[Theme] = [
     Theme(
         key='moss-dark', skin='moss', mode='dark',
         motif=(126, 255, 205), glow=(70, 227, 166), vignette=(0, 5, 4),
-        motif_alpha=0.34, glow_alpha=0.30, sheen=0.030, seed=20261024,
+        motif_alpha=0.30, glow_alpha=0.26, sheen=0.026, seed=20261024,
         motif_kind='filament',
     ),
     Theme(
         key='moss-light', skin='moss', mode='light',
         motif=(14, 138, 95), glow=(14, 138, 95), vignette=(96, 124, 112),
-        motif_alpha=0.22, glow_alpha=0.13, sheen=0.038, seed=20261025,
+        motif_alpha=0.20, glow_alpha=0.11, sheen=0.030, seed=20261025,
         motif_kind='filament',
     ),
     # ── 550W 待机红（工业告警）─────────────────────────────────────────
     Theme(
         key='550w-dark', skin='550w', mode='dark',
         motif=(255, 152, 104), glow=(255, 59, 47), vignette=(8, 3, 2),
-        motif_alpha=0.32, glow_alpha=0.30, sheen=0.026, seed=20261026,
-        motif_kind='crack', hatch=True,
+        motif_alpha=0.28, glow_alpha=0.26, sheen=0.022, seed=20261026,
+        motif_kind='crack',
     ),
     Theme(
         key='550w-light', skin='550w', mode='light',
         motif=(180, 49, 31), glow=(180, 49, 31), vignette=(158, 112, 94),
-        motif_alpha=0.21, glow_alpha=0.12, sheen=0.036, seed=20261027,
-        motif_kind='crack', hatch=True,
+        motif_alpha=0.19, glow_alpha=0.10, sheen=0.030, seed=20261027,
+        motif_kind='crack',
     ),
 ]
 
@@ -109,24 +145,25 @@ def smoothstep(t: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
-def quiet_mask(w: int, h: int) -> np.ndarray:
+def quiet_mask(w: int, h: int, floor: float) -> np.ndarray:
     """
-    安静区遮罩：左上（文字区）→ 0.10，右下（图案区）→ 1.0。
+    安静区遮罩：左上（文字区）→ floor，右下（图案区）→ 1.0。
 
     卡片上的标题、摘要、按钮都在左上或整幅展开，所以图案必须往右下方退。
     这个遮罩让纹理有明确的"呼吸区"，而不是均匀铺满——
     这是"不遮挡文字"的结构性保证，而不是靠调低整体不透明度
     （那会让纹理失去存在感）。
 
-    残留在文字区的 0.10 系数是刻意的：完全为 0 会让左上出现
-    一块"什么都没发生"的死区，看起来像图片没加载。
+    floor 是文字区允许的残留量。card/hero 取 0.05：
+    完全为 0 会让左上出现一块"什么都没发生"的死区，看起来像图片没加载。
+    amb 取 0：整页层不留任何图案残留。
     """
     x = np.linspace(0.0, 1.0, w)[None, :]
     y = np.linspace(0.0, 1.0, h)[:, None]
-    wx = smoothstep((x - 0.30) / 0.55)
-    wy = smoothstep((y - 0.18) / 0.62)
-    m = np.clip(wx * wy * 1.12 - 0.02, 0.0, 1.0) ** 0.85
-    return 0.10 + 0.90 * m
+    wx = smoothstep((x - 0.28) / 0.52)
+    wy = smoothstep((y - 0.16) / 0.58)
+    m = np.clip(wx * wy * 1.14 - 0.02, 0.0, 1.0) ** 0.80
+    return floor + (1.0 - floor) * m
 
 
 def radial_glow(w: int, h: int, cx: float, cy: float, r: float, strength: float) -> np.ndarray:
@@ -271,7 +308,6 @@ def draw_hatch(w: int, h: int, theme: Theme) -> Image.Image:
     斜纹是强符号，一整片铺上去会和正文打架，所以限制在角落，
     并且叠在安静区遮罩之后 —— 文字区域永远看不到它。
     """
-    rng = random.Random(theme.seed + 7)
     cw, ch = w * SS, h * SS
     layer = Image.new('RGBA', (cw, ch), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -298,52 +334,92 @@ def draw_hatch(w: int, h: int, theme: Theme) -> Image.Image:
     return tint_alpha(layer, a * edge, theme.motif)
 
 
+def draw_arcs(w: int, h: int, theme: Theme) -> Image.Image:
+    """
+    雷达弧环 —— 页面级环境层的主角。
+
+    取自本产品已有的视觉语言（docs/07 §3：MOSS 状态台的雷达扫描线）。
+    弧环的好处：线条平滑、对比度低、尺度大，
+    铺满整页时不会在任何位置形成高频干扰，文字始终读得清。
+    """
+    rng = random.Random(theme.seed + 31)
+    cw, ch = w * SS, h * SS
+    layer = Image.new('RGBA', (cw, ch), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    rgb = theme.motif
+    max_alpha = int(round(theme.motif_alpha * 255 * 0.42))
+
+    # 圆心在右下角，弧线向左上扩散
+    cx, cy = cw * 1.06, ch * 1.04
+    r = cw * 0.20
+    i = 0
+    while r < cw * 1.5:
+        a = max(8, int(max_alpha * (1.0 - i / 26.0) * rng.uniform(0.75, 1.0)))
+        width = max(1, int((2.6 - i * 0.07) * SS))
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            outline=rgb + (a,), width=width,
+        )
+        r += cw * rng.uniform(0.055, 0.085)
+        i += 1
+
+    layer = layer.filter(ImageFilter.GaussianBlur(radius=0.5 * SS))
+    return layer.resize((w, h), Image.LANCZOS)
+
+
 # ── 合成 ────────────────────────────────────────────────────────────────
 
 
-def build_texture(theme: Theme, w: int, h: int, density: float, seed_shift: int) -> Image.Image:
+def build_texture(theme: Theme, prof: Profile, seed_shift: int) -> Image.Image:
     """
     合成一张 RGBA 纹理。
 
     图层顺序（从下到上）：
       1. 强调色辉光（大尺度，负责纵深）
-      2. 主图案（菌丝 / 裂纹）
-      3. 警示斜纹（仅 550W）
+      2. 主图案（菌丝 / 裂纹 / 雷达弧环）
+      3. 警示斜纹（仅 550W 的 card/hero）
       4. 暗角（把视线收回卡片中心）
       5. 斜向高光带（玻璃质感的那一道反射）
 
-    图案层统一乘以安静区遮罩 —— 这是"不遮挡文字"的结构性保证。
+    **辉光与高光同样乘安静区遮罩**。最初只有图案层乘了遮罩，
+    于是辉光溢进文字区，--t1 的对比度从 16.6 掉到 3.7——
+    这是"看起来有纹理但字看不清"的典型成因。
     """
+    w, h = prof.w, prof.h
+    density = prof.density
     canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    qm = quiet_mask(w, h)
+    qm = quiet_mask(w, h, prof.quiet_floor)
 
     # 1. 辉光
     #
     # 辉光**也要**乘安静区遮罩。漏了这一步是最初的 bug：
     # 图案层压住了、辉光层没压住，而辉光的亮度远高于图案，
     # 于是文字区被一团绿色雾笼罩，--t1 的对比度从 16.6 掉到 3.7。
-    # 辉光中心本来就在右下（qm≈1），遮罩不会削弱它的主体，
-    # 只是掐掉了溢进文字区的那一圈。
-    glow_a = radial_glow(w, h, 0.82, 0.76, 0.66, theme.glow_alpha * density)
+    #
+    # 辉光强度也不随 profile.density 线性放大：density 是给"图案密度"用的，
+    # 辉光是"底光"，跟着放大就成了一片发光的雾。
+    glow_a = radial_glow(w, h, 0.84, 0.78, prof.glow_r, theme.glow_alpha * (0.55 + 0.45 * density))
     canvas = Image.alpha_composite(canvas, solid_layer(w, h, theme.glow, glow_a * qm))
 
     # 2. 主图案
-    motif = draw_filament(w, h, theme) if theme.motif_kind == 'filament' else draw_crack(w, h, theme)
+    if prof.motif:
+        motif = draw_filament(w, h, theme) if theme.motif_kind == 'filament' else draw_crack(w, h, theme)
+    elif prof.arcs:
+        motif = draw_arcs(w, h, theme)
+    else:
+        motif = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    if motif.size != (w, h):
+        motif = motif.resize((w, h), Image.LANCZOS)
     ma = np.asarray(motif.split()[3]).astype(np.float64) / 255.0
     canvas = Image.alpha_composite(canvas, tint_alpha(motif, ma * qm * density, theme.motif))
 
     # 3. 警示斜纹
-    if theme.hatch:
+    if prof.hatch:
         hatch = draw_hatch(w, h, theme)
         ha = np.asarray(hatch.split()[3]).astype(np.float64) / 255.0
         canvas = Image.alpha_composite(canvas, tint_alpha(hatch, ha * qm * density, theme.motif))
 
     # 4. 暗角
-    #
-    # 暗角只压**边缘**（d > 0.56），文字区在左上角，d≈0.85 反而落在
-    # 暗角最强处——但那正是"卡片外沿"，视觉上本来就该暗。
-    # 为了不伤文字，这里把暗角上限从纯黑换成"接近底色的暗色"，
-    # 并把浓度按明暗区分：浅色底上同样的暗角会把底色拉脏。
     x = np.linspace(0.0, 1.0, w)[None, :]
     y = np.linspace(0.0, 1.0, h)[:, None]
     d = np.sqrt(((x - 0.5) / 0.80) ** 2 + ((y - 0.5) / 0.88) ** 2)
@@ -398,17 +474,12 @@ def main() -> None:
     previews: list[tuple[str, Image.Image, tuple[int, int, int]]] = []
 
     for theme in THEMES:
-        specs = [
-            ('card', W_CARD, H_CARD, 1.0, 0, 20_000),
-            ('hero', W_HERO, H_HERO, 1.55, 11, 26_000),
-            ('amb', W_AMB, H_AMB, 0.85, 23, 14_000),
-        ]
-        for name, w, h, density, shift, cap in specs:
-            tex = build_texture(theme, w, h, density=density, seed_shift=shift)
+        for name, prof in PROFILES.items():
+            tex = build_texture(theme, prof, seed_shift=0)
             path = os.path.join(OUT, f'{name}-{theme.key}.webp')
-            size, q = save_webp(tex, path, quality=74, max_bytes=cap)
-            flag = '  ' if size <= cap else '⚠ '
-            print(f'{flag}{name}-{theme.key}.webp  {w}x{h}  q={q}  {size / 1024:.1f}KB')
+            size, q = save_webp(tex, path, quality=74, max_bytes=prof.cap_bytes)
+            flag = '  ' if size <= prof.cap_bytes else '⚠ '
+            print(f'{flag}{name}-{theme.key}.webp  {prof.w}x{prof.h}  q={q}  {size / 1024:.1f}KB')
             base = (11, 18, 16) if theme.mode == 'dark' else (243, 247, 244)
             previews.append((f'{name} · {theme.key}', tex, base))
 
