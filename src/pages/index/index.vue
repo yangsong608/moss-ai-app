@@ -1076,7 +1076,7 @@ onLoad(() => {
 .hero {
   position: relative;
   overflow: hidden;
-  padding: 15px 16px 0;
+  padding: 15px 16px 16px;
   border: 1px solid var(--bd);
   border-radius: 22px;
   background:
@@ -1086,17 +1086,6 @@ onLoad(() => {
   transition: background-color 160ms ease-out, border-color 160ms ease-out;
 }
 
-.hero::after {
-  content: '';
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 51px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--bd-strong), transparent);
-  opacity: 0.65;
-  pointer-events: none;
-}
 
 .hero-scan {
   position: absolute;
@@ -1498,7 +1487,7 @@ onLoad(() => {
 .foot-lock::before { content: ''; position: absolute; left: 1px; top: -5px; width: 3px; height: 4px; border: 1px solid var(--t3); border-bottom: 0; border-radius: 3px 3px 0 0; }
 
 /* ── 头部配对操作区（按钮放在 hero 卡内，不再有底部 dock） ───────────── */
-.hero-pair { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
+.hero-pair { display: flex; flex-direction: column; gap: 6px; margin-top: 13px; }
 
 .hero-cta {
   position: relative;
@@ -1506,22 +1495,39 @@ onLoad(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--acc) 78%, var(--t1));
-  border-radius: 15px;
-  background: linear-gradient(110deg, color-mix(in srgb, var(--acc) 82%, var(--bg)), var(--acc) 52%, color-mix(in srgb, var(--acc) 76%, var(--t1)));
-  box-shadow: var(--cta-shadow, 0 8px 22px color-mix(in srgb, var(--acc) 30%, transparent)), inset 0 1px 0 var(--glass-hi, transparent);
+  border: 1px solid color-mix(in srgb, var(--acc) 72%, var(--t1));
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(108deg, color-mix(in srgb, var(--acc) 84%, var(--bg)), var(--acc) 54%, color-mix(in srgb, var(--acc) 74%, var(--t1)));
+  box-shadow:
+    0 6px 18px color-mix(in srgb, var(--acc) 26%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
   color: var(--acc-ink);
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 750;
-  letter-spacing: 0.5px;
-  transition: transform 90ms ease-out, opacity 90ms ease-out;
+  letter-spacing: 0.3px;
+  transition: transform 90ms ease-out, box-shadow 160ms ease-out;
 }
-.hero-cta:active { transform: scale(0.97); opacity: 0.96; }
-.hero-cta-plus { position: relative; z-index: 1; font-size: 17px; line-height: 1; }
+.hero-cta:active { transform: scale(0.975); box-shadow: 0 3px 10px color-mix(in srgb, var(--acc) 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.hero-cta-plus { position: relative; z-index: 1; font-size: 16px; line-height: 1; opacity: 0.92; }
 .hero-cta-t { position: relative; z-index: 1; line-height: 1; }
-.hero-cta-code { position: absolute; z-index: 1; right: 13px; font-size: 7px; font-weight: 500; letter-spacing: 1px; opacity: 0.6; }
+.hero-cta-code {
+  position: absolute;
+  z-index: 1;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 6.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  opacity: 0.72;
+}
 
 .hero-pair-alt {
   min-height: 26px;
@@ -1530,7 +1536,7 @@ onLoad(() => {
   justify-content: center;
   gap: 5px;
   color: var(--t2);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.3px;
   transition: transform 90ms ease-out, color 160ms ease-out;
 }
