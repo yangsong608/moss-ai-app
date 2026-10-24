@@ -447,6 +447,9 @@ function askAi(): void {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--bg-grad-3) 72%, transparent);
   animation: mask-in 160ms var(--ease-out);
 }
@@ -459,9 +462,12 @@ function askAi(): void {
 .sheet {
   width: 100%;
   max-width: 560px;
-  max-height: 86vh;
+  /* 底部升起：88dvh 留出顶部呼吸位，正文在 .body 内独立滚动 */
+  max-height: 88vh;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--s1);
   border: 1px solid var(--bd-strong);
   border-bottom: 0;
@@ -902,7 +908,10 @@ function askAi(): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--bg-grad-3) 74%, transparent);
   animation: mask-in 150ms var(--ease-out);
 }
@@ -910,6 +919,13 @@ function askAi(): void {
 .cmodal {
   width: 100%;
   max-width: 400px;
+  /* 居中弹窗：margin:auto 兜底，内容超高时在弹窗内滚动而不是上下同时溢出 */
+  margin: auto;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 18px;
   border-radius: var(--r-lg);
   border: 1px solid var(--bd-strong);

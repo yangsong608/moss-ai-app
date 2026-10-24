@@ -1555,14 +1555,17 @@ onLoad(() => {
   background: var(--mask-bg);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .sheet {
   width: 100%;
   max-width: 520px;
-  max-height: calc(100vh - 60px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 8px 16px 16px;
   border: 1px solid var(--bd);
   border-radius: 22px;

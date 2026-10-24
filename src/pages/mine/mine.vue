@@ -571,11 +571,17 @@ function placeholder(text: string): void {
   background: rgba(6, 14, 10, 0.48);
   display: flex;
   align-items: flex-end;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .ov-card {
   width: 100%;
-  max-height: 82vh;
+  max-height: 88vh;
+  max-height: 88dvh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: var(--s1);
   border-top-left-radius: var(--r-lg);
   border-top-right-radius: var(--r-lg);

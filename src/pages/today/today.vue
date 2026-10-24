@@ -1233,7 +1233,8 @@ function doClear(): void {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  perspective: 900px;
+  /* 透视不放在页面/列表容器上：perspective 会让 fixed 后代改为相对它定位。
+     月历翻页的 3D 感只需作用在 .flipzone（只包翻页卡，不包含任何弹层）。 */
 }
 
 .calpage {
@@ -1349,7 +1350,13 @@ function doClear(): void {
 .calidx { font-size: 10px; color: var(--t2); padding: 3px 8px; border-radius: 999px; background: var(--s3); }
 
 /* ── 翻页卡片 ── */
-.flipzone { position: relative; padding: 2px 14px 12px; min-height: 176px; }
+.flipzone {
+  position: relative;
+  padding: 2px 14px 12px;
+  min-height: 176px;
+  /* 只让翻页卡参与 3D；弹层在页面根节点，不在这个子树里 */
+  perspective: 900px;
+}
 .peek { position: absolute; left: 20px; right: 20px; height: 100%; border-radius: 14px; border: 1px solid var(--bd); background: var(--s2); }
 .peek.p1 { top: 8px; opacity: 0.55; }
 .peek.p2 { top: 14px; left: 26px; right: 26px; opacity: 0.3; }
@@ -1883,6 +1890,12 @@ function doClear(): void {
   width: 100%;
   max-width: 520px;
   margin: 0 auto;
+  /* 底部菜单最多 88dvh，项目多时可滚，取消条不会被顶出屏幕 */
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 0 12px calc(10px + var(--safe-bottom-real, 0px));
   border-top: 1px solid var(--bd-strong);
   border-top-left-radius: 18px;
@@ -1994,7 +2007,10 @@ function doClear(): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 20px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--bg-grad-3) 74%, transparent);
   animation: mask-in 150ms var(--ease-out);
 }
@@ -2007,6 +2023,13 @@ function doClear(): void {
 .modal {
   width: 100%;
   max-width: 400px;
+  /* 居中弹窗：margin:auto 保证超高时从顶部开始而不是上下同时溢出 */
+  margin: auto;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 18px;
   border-radius: var(--r-lg);
   border: 1px solid var(--bd-strong);

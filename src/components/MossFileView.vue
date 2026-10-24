@@ -218,14 +218,21 @@ function close(): void {
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: flex-end;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .panel {
   width: 100%;
-  max-height: 92vh;
-  height: 92vh;
+  /* 底部升起：88dvh 让顶部始终留在屏幕内，文件正文在 .body 内滚动 */
+  height: 88vh;
+  height: 88dvh;
+  max-height: 88vh;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;

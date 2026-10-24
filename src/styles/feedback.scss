@@ -50,12 +50,24 @@
 .fb-enter-card { animation: fb-enter 260ms var(--ease-out) both; }
 @keyframes fb-enter {
   from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  /* 结束值写 none：动画仍会从 8px 滑入，但 both 填充结束后不再保留
+     transform，避免卡片里若有 fixed 内容时同样被当成包含块。 */
+  to { opacity: 1; transform: none; }
 }
+/*
+ * 页面内容入场只动 opacity，**不要动 transform**。
+ *
+ * 任何非 none 的 transform（包括 animation-fill-mode: both 保留到动画结束的
+ * translateY(0)）都会让这个元素成为 position: fixed 后代的包含块。工作台把
+ * 页面内容包在 .ws-inner 里，一旦它带 transform，页面内的遮罩/弹层就不再
+ * 相对视口，而是相对整页内容：短内容看着正常，内容一长弹层就被摆到页面
+ * 中部/底部，头部与按钮出屏且无法滚动（用户反馈的"按页面长度居中"）。
+ * 位移入场留给卡片级动画（.fb-enter 等），它们不包裹弹层。
+ */
 .fb-content-enter { animation: fb-content-enter 120ms ease-out both; }
 @keyframes fb-content-enter {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 .fb-exit { animation: fb-exit 120ms ease-in both; }
 @keyframes fb-exit {

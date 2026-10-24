@@ -719,20 +719,27 @@ onUnmounted(() => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: color-mix(in srgb, var(--bg) 76%, transparent);
 }
 .sheet {
   width: 100%;
   max-width: 560px;
-  max-height: 74vh;
+  /* 底部升起：88dvh，头部固定、任务列表在内部滚动 */
+  max-height: 88vh;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--s1);
   border: 1px solid var(--bd);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 16px 16px calc(18px + env(safe-area-inset-bottom));
 }
 .sheet-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -755,7 +762,12 @@ onUnmounted(() => {
   color: var(--t2);
   font-size: 12px;
 }
-.sheet-list { max-height: 56vh; }
+.sheet-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 56vh;
+  overscroll-behavior: contain;
+}
 .pick-row {
   display: flex;
   align-items: center;

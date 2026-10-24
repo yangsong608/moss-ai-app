@@ -2627,12 +2627,21 @@ watch(calView, (v) => {
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: flex-end;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .fsheet {
   width: 100%;
   max-width: 520px;
   margin: 0 auto;
+  /* 新建表单内容较多（标题/日期/优先级/时长/备注）：限制高度并在面板内滚动 */
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;

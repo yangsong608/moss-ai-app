@@ -205,6 +205,11 @@ function ok(): void {
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: flex-end;
+  justify-content: center;
+  /* 遮罩本身可滚：矮屏上即使面板没来得及限高，也不会让顶部永久出屏 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   /* 遮罩淡入，避免"啪"地出现 */
   animation: mask-in 160ms var(--ease-out);
 }
@@ -219,9 +224,12 @@ function ok(): void {
   /* 平板上不要让弹层横跨整屏：居中受限更好读 */
   max-width: 520px;
   margin: 0 auto;
-  max-height: 78vh;
+  /* 底部升起：最多占 88% 视口，超出部分交给内部滚动，头部按钮不随内容移出视口 */
+  max-height: 88vh;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
   border-top: 1px solid var(--bd-strong);
   border-top-left-radius: 16px;
@@ -230,6 +238,12 @@ function ok(): void {
   animation: sheet-up var(--t-mid) var(--ease-out);
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
 }
+
+/* 固定区：抓手 / 标题 / 操作按钮不参与滚动压缩 */
+.grab,
+.head,
+.actions,
+.cancel-bar { flex: 0 0 auto; }
 
 @keyframes sheet-up {
   from { transform: translateY(18px); opacity: 0.6; }
@@ -247,7 +261,13 @@ function ok(): void {
 .head { padding: 6px 16px 2px; }
 .title { font-size: 14px; color: var(--t1); font-weight: 600; }
 
-.list { max-height: 52vh; padding: 4px 8px 0; }
+.list {
+  max-height: 52vh;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 8px 0;
+  overscroll-behavior: contain;
+}
 
 .item {
   display: flex;
@@ -276,7 +296,15 @@ function ok(): void {
   transform: rotate(45deg);
 }
 
-.body { padding: 10px 16px 4px; }
+/* confirm / info / prompt 的长正文：面板内滚动，不再把按钮顶出屏幕 */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 16px 4px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 .msg { font-size: 13px; color: var(--t2); line-height: 20px; }
 
 .input {

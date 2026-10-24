@@ -2274,13 +2274,19 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: flex-end;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .diff-panel {
   width: 100%;
-  max-height: 72%;
+  /* 差异列表可很长：底部抽屉限高 88dvh，头部固定、正文内部滚动 */
+  max-height: 88vh;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
   border-top-left-radius: var(--r-lg);
   border-top-right-radius: var(--r-lg);
@@ -2299,7 +2305,7 @@ onUnmounted(() => {
 .diff-path { flex: 1; min-width: 0; font-size: 12px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .diff-close { flex: none; font-size: 12.5px; color: var(--acc); }
 
-.diff-body { flex: 1; padding: 8px 12px 16px; }
+.diff-body { flex: 1 1 auto; min-height: 0; padding: 8px 12px 16px; overscroll-behavior: contain; }
 
 .diff-line { display: flex; gap: 8px; padding: 1px 0; }
 .diff-sig { flex: none; width: 10px; font-size: 11px; color: var(--t3); }
