@@ -17,7 +17,11 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const DIST = join(ROOT, 'dist/build/h5')
+// 默认验 uni CLI 的 H5 产物；HBuilderX 发行产物用 --dir dist/build/web
+const dirArg = process.argv.indexOf('--dir')
+const DIST = dirArg > -1 && typeof process.argv[dirArg + 1] === 'string'
+  ? resolve(ROOT, process.argv[dirArg + 1])
+  : join(ROOT, 'dist/build/h5')
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 /** 每条路由配一组必须出现的文案（越多越能抓住"白屏/渲染失败"） */
