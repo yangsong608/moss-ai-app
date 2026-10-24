@@ -1093,6 +1093,27 @@ body{
 .lbody .trow .tt{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lbody .trow .tmeta{margin-top:7px}
 .lbody .conflict-card{margin:-2px 0 10px}
+
+/* ═══════════ 宽屏：内容区放宽 + 利用横向空间 ═══════════ */
+@media (min-width:1100px) and (min-height:560px){
+  .center{max-width:1120px}
+  /* 今天：任务卡两列 */
+  .lbody{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  .lbody .trow{margin:0}
+  .lbody .conflict-card{grid-column:1 / -1;margin:0}
+  .lbody .lempty{grid-column:1 / -1}
+  /* 资讯：三列 */
+  .newsgrid{columns:3}
+  /* 专注：左计时 + 右队列/统计 */
+  #s-focus .center{display:grid;grid-template-columns:minmax(340px,440px) 1fr;gap:8px 36px;align-items:start}
+  #s-focus .focus-left{grid-column:1;display:flex;flex-direction:column;align-items:center}
+  #s-focus .focus-right{grid-column:2;min-width:0}
+  .focus-right .sect:first-child{margin-top:0}
+  /* 笔记：编辑器占更大宽度 */
+  .notes-wrap .notecol{flex:0 0 300px}
+  /* 日历：让周视图撑满 */
+  .weekwrap{max-width:none}
+}
 </style>
 </head>
 <body class="dsh" data-skin="moss" data-light="1">
@@ -1271,7 +1292,7 @@ body{
       <!-- ── 专注 ── -->
       <section class="screen" id="s-focus">
         <div class="pad"><div class="center">
-          <div class="focus-wrap">
+          <div class="focus-left"><div class="focus-wrap">
             <button class="imm-tip" id="immExit"><span class="dot acc"></span>沉浸模式中 · 点此退出</button>
             <div class="ringwrap">
               <svg viewBox="0 0 240 240">
@@ -1303,6 +1324,7 @@ body{
               <span class="badge mut">切换</span>
             </button>
           </div>
+          </div><div class="focus-right">
           <div class="sect"><span class="t">专注队列</span><span class="n">3 条待专注</span><span class="line"></span></div>
           <div id="focusQueue"></div>
           <div class="sect"><span class="t">今日专注统计</span><span class="n">截至 18:40</span><span class="line"></span></div>
@@ -1317,12 +1339,13 @@ body{
               <button class="switch" id="swImm" aria-label="沉浸模式"></button>
             </div>
           </div>
+          </div>
         </div></div>
       </section>
 
       <!-- ── 资讯 ── -->
       <section class="screen" id="s-news">
-        <div class="pad"><div class="center" style="max-width:1080px">
+        <div class="pad"><div class="center">
           <div class="row wrap" style="gap:10px">
             <div>
               <div style="font-size:19px;font-weight:600;letter-spacing:-.2px">资讯</div>
