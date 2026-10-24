@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import PageShell from '@/components/PageShell.vue'
+import WorkBackBar from '@/components/WorkBackBar.vue'
 import MossDot from '@/components/moss/MossDot.vue'
 import MossBadge from '@/components/moss/MossBadge.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
@@ -367,6 +368,9 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
 
 <template>
   <PageShell active="sessions" @tab="goTab">
+    <!-- 旧壳 ↔ 新壳的返回闭环（P2-3）：保留原 3+1 Tab，顶部加一条回工作台的出口 -->
+    <WorkBackBar hint="今天 · 任务 / 日历 / 笔记" />
+
     <view class="head safe-top">
       <text class="h1">会话</text>
       <view class="head-r">

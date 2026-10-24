@@ -11,9 +11,12 @@
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
-import { addNote, isoDay, removeNote, updateNote, useWork } from '@/core/workbench'
+import { addNote, deviceName, isoDay, removeNote, updateNote, useWork } from '@/core/workbench'
 import type { Note } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { stashContext } from '@/core/ai-context'
+import { dispatchNotePolish, liveAiHost } from '@/core/ai-dispatch'
+import type { DispatchOutcome } from '@/core/ai-dispatch'
 
 const { data } = useWork()
 
@@ -29,6 +32,18 @@ const saveState = ref<'saved' | 'dirty'>('saved')
 const createOpen = ref(false)
 const newNotebook = ref('')
 const customNotebook = ref('')
+
+/**
+ * AI 完善（P2-1）的页面态：
+ *   - aiBusy：派发中 / 等待回写，按钮置灰避免重复派发；
+ *   - aiHint：常驻一行状态（成功/超时/降级），比一闪而过的 toast 更有用；
+ *   - aiWarn：降级或失败时用警示色；
+ *   - aiStop：离开页面时置 true，轮询最多再等一个 tick 就退出。
+ */
+const aiBusy = ref(false)
+const aiHint = ref('')
+const aiWarn = ref(false)
+let aiStop = false
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -205,9 +220,125 @@ function createNote(): void {
   toast(`已在「${notebook}」新建笔记`)
 }
 
-function aiPolish(): void {
+/**
+ * AI 完善（P2-1）：经设备上的 DSH agent 回写这篇笔记。
+ *
+ * 流程全在 `ai-dispatch.ts`：先 syncNow() 推一轮（agent 要读得到）→ workspace.list
+ * 取第一个 → session.create → session.prompt（指令里带笔记 id 与 workbench_note_update
+ * 的硬要求）→ 每 5s 同步一轮，最多 12 次，等这篇笔记的 updatedAt 变化。
+ *
+ * 离线 / caps 不支持：降级为弹窗说明"只在本机保存"，不假装派发成功。
+ */
+async function runPolish(extra: string): Promise<void> {
+  if (aiBusy.value) return
+  const note = activeNote.value
+  if (note === null) return
+  // 先落盘再派发：否则 agent 读到的是 600ms 防抖之前的旧正文
+  flush()
+  const fresh = data.value.notes.find((n) => n.id === note.id)
+  if (fresh === undefined) return
   haptic('light')
-  toast('AI 完善将在 M2 接入：只改标题/正文，笔记本与标签不动')
+  aiBusy.value = true
+  aiWarn.value = false
+  aiHint.value = `正在派发给「${deviceName()}」执行…`
+  aiStop = false
+  const requirement = extra.trim()
+  try {
+    const host = await liveAiHost()
+    const outcome = await dispatchNotePolish(
+      host,
+      {
+        noteId: fresh.id,
+        title: draftTitle.value || fresh.title,
+        notebook: fresh.notebook,
+        ...(requirement === '' ? {} : { extra: requirement }),
+      },
+      { shouldStop: () => aiStop },
+    )
+    applyAiOutcome(outcome)
+  } catch (error) {
+    aiWarn.value = true
+    aiHint.value = '派发失败：连接层不可用，内容只在本机保存。'
+    uni.showModal({
+      title: 'AI 完善失败',
+      content: `${aiHint.value}\n\n${error instanceof Error ? error.message : String(error)}`,
+      showCancel: false,
+      confirmText: '知道了',
+    })
+  } finally {
+    aiBusy.value = false
+  }
+}
+
+/** 手机端没有后台任务列表，结果必须"落"在页面上：成功刷新草稿，其余说明原因。 */
+function applyAiOutcome(outcome: DispatchOutcome): void {
+  aiWarn.value = outcome.status !== 'done'
+  aiHint.value = outcome.message
+  if (outcome.status === 'done') {
+    // 拉回来的新正文要立刻进编辑器，否则下一次 flush 会把 AI 的结果覆盖回去
+    const refreshed = data.value.notes.find((n) => n.id === editingId.value)
+    if (refreshed !== undefined) loadDraft(refreshed)
+    haptic('medium')
+    toast('AI 已回写并同步')
+    return
+  }
+  if (outcome.status === 'cancelled') return
+  if (outcome.status === 'timeout') {
+    uni.showToast({ title: '已在设备上执行，稍后自动同步', icon: 'none', duration: 2800 })
+    return
+  }
+  const title = outcome.status === 'degraded'
+    ? (outcome.code === 'no-workbench' ? '设备不支持 AI 回写' : '需要连接设备')
+    : 'AI 完善失败'
+  uni.showModal({ title, content: outcome.message, showCancel: false, confirmText: '知道了' })
+}
+
+function aiPolish(): void {
+  void runPolish('')
+}
+
+/** 「按要求完善」：追加一句要求（如"压缩到 300 字"），其余流程与 AI 完善一致。 */
+function aiPolishWithRequirement(): void {
+  if (aiBusy.value) return
+  if (activeNote.value === null) return
+  uni.showModal({
+    title: '按要求完善',
+    editable: true,
+    placeholderText: '例如：压缩到 300 字，并补一节风险',
+    confirmText: '派发',
+    cancelText: '取消',
+    success: (res) => {
+      if (!res.confirm) return
+      const extra = typeof res.content === 'string' ? res.content.trim() : ''
+      if (extra === '') toast('没有填写要求，按默认方式完善')
+      void runPolish(extra)
+    },
+  })
+}
+
+/**
+ * 问 AI（P2-3）：把当前笔记的标题/正文摘要暂存到上下文槽，跳对话页预填。
+ *
+ * 先 flush()：用户可能刚敲完还没到 600ms 防抖，直接读 store 会带旧正文过去。
+ * 摘要去掉 Markdown 标记并压成单行（输入框是单行，换行会被吃掉）。
+ */
+function askAi(): void {
+  const note = activeNote.value
+  if (note === null) return
+  flush()
+  haptic('light')
+  const excerpt = draftBody.value
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+  stashContext({
+    kind: 'note',
+    id: note.id,
+    title: draftTitle.value.trim() === '' ? '未命名笔记' : draftTitle.value,
+    excerpt,
+  })
+  uni.navigateTo({ url: '/pages/chat/chat?from=workbench' })
 }
 
 function selectFirstForWide(): void {
@@ -234,6 +365,8 @@ onMounted(selectFirstForWide)
 onUnmounted(() => {
   flush()
   if (saveTimer !== undefined) clearTimeout(saveTimer)
+  // 离开页面后不再等设备回写：轮询下一个 tick 就退出（任务本身在设备上继续跑）
+  aiStop = true
 })
 </script>
 
@@ -241,7 +374,7 @@ onUnmounted(() => {
   <WorkShell active="notes" title="笔记" :sub="`${data.notes.length} 篇 · 本地存储 · 笔记本 / 标签不丢`">
     <view class="notes-page" :class="{ 'is-editing': editingId !== '' }">
       <view class="page-head">
-        <text class="head-note">自动保存 · 离线可用 · M2 与 DSH 双向同步</text>
+        <text class="head-note">自动保存 · 离线可用 · AI 完善需连接设备（内容只在本机保存）</text>
         <view class="btn primary head-new" @tap="openCreate">＋ 新建</view>
       </view>
 
@@ -336,8 +469,18 @@ onUnmounted(() => {
             </view>
 
             <view class="ed-foot">
-              <view class="btn primary ed-ai" @tap="aiPolish">AI 完善</view>
+              <view class="btn primary ed-ai" :class="{ busy: aiBusy }" @tap="aiPolish">
+                <text>{{ aiBusy ? '完善中…' : 'AI 完善' }}</text>
+              </view>
+              <view class="btn ed-ai ed-req" :class="{ busy: aiBusy }" @tap="aiPolishWithRequirement">
+                <text>按要求</text>
+              </view>
+              <!-- 次按钮：带这篇笔记的标题/正文摘要进对话页（P2-3） -->
+              <view class="btn ed-ai ed-ctx" @tap="askAi">问 AI</view>
               <text class="foot-hint">输入后 600ms 自动保存 · 不丢笔记本/标签</text>
+            </view>
+            <view v-if="aiHint !== ''" class="ai-hint" :class="{ bad: aiWarn }">
+              <text>{{ aiHint }}</text>
             </view>
           </view>
         </view>
@@ -648,6 +791,23 @@ onUnmounted(() => {
   padding: 0 16px;
   font-size: 12.5px;
 }
+.ed-ai.busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* 「按要求完善」：比主按钮轻一档，但保持 38px 触控高度 */
+.ed-req {
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: var(--t2);
+}
+/* 次按钮：浅色卡片 + 强调色文字，和 WorkShell 的浅色卡片观感一致 */
+.ed-ctx {
+  padding: 0 14px;
+  color: var(--acc);
+  border-color: var(--bd-strong);
+  background: var(--acc-soft);
+}
 .foot-hint {
   flex: 1;
   min-width: 0;
@@ -656,6 +816,16 @@ onUnmounted(() => {
   color: var(--t3);
   text-align: right;
 }
+/* 常驻状态行：成功/等待/降级都写在这里，不依赖一闪而过的 toast */
+.ai-hint {
+  padding: 8px 14px;
+  border-top: 1px solid var(--bd);
+  background: var(--s1);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--t3);
+}
+.ai-hint.bad { color: var(--warn); }
 
 .edit-placeholder {
   display: none;
@@ -760,6 +930,12 @@ onUnmounted(() => {
   .notes-page.is-editing .ed-body { min-height: 160px; }
   .notes-page.is-editing .ed-foot {
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    flex-wrap: wrap;
+  }
+  /* 三个按钮 + 提示在 375px 上放不下一行：提示单独占一行，按钮保持 38px */
+  .notes-page.is-editing .foot-hint {
+    flex: 1 1 100%;
+    text-align: left;
   }
 }
 

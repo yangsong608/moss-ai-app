@@ -23,6 +23,7 @@ import {
   type TaskStatus,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { stashContext } from '@/core/ai-context'
 
 const props = defineProps<{
   visible: boolean
@@ -225,6 +226,32 @@ function aiSplit(): void {
     duration: 2400,
   })
 }
+
+/** 给 agent 的摘要：优先备注，其次未完成子待办；都为空就不带摘要。 */
+function taskExcerpt(task: Task): string {
+  const note = task.note.replace(/\s+/g, ' ').trim()
+  if (note !== '') return note.slice(0, 160)
+  const subs = task.sub.filter((s) => !s.done).map((s) => s.title).slice(0, 5)
+  return subs.length === 0 ? '' : `待办：${subs.join(' / ')}`
+}
+
+/**
+ * 问 AI（P2-3）：把任务标题/备注暂存到上下文槽，再跳对话页。
+ * 对话页会把它预填进输入框（不自动发送）；用户补完问题自己按发送。
+ */
+function askAi(): void {
+  const task = found.value
+  if (task === undefined) return
+  haptic('light')
+  stashContext({
+    kind: 'task',
+    id: task.id,
+    title: task.title.trim() === '' ? '未命名任务' : task.title,
+    excerpt: taskExcerpt(task),
+  })
+  close()
+  uni.navigateTo({ url: '/pages/chat/chat?from=workbench' })
+}
 </script>
 
 <template>
@@ -353,9 +380,10 @@ function aiSplit(): void {
 
           <view class="actions">
             <view class="abtn primary" @tap="aiSplit"><text>让 AI 拆解</text></view>
+            <view class="abtn ctx" @tap="askAi"><text>问 AI</text></view>
             <view class="abtn" @tap="onToggleDone"><text>{{ t.done ? '恢复未完成' : '标记完成' }}</text></view>
           </view>
-          <text class="ai-desc">「让 AI 拆解」会把任务拆成可执行子步骤并回写本机；笔记本与标签不动。M1 先做占位提示。</text>
+          <text class="ai-desc">「让 AI 拆解」会把任务拆成可执行子步骤并回写本机；「问 AI」带着这条任务的标题与备注进入对话页，不会自动发送。</text>
         </view>
       </scroll-view>
     </view>
@@ -796,6 +824,13 @@ function aiSplit(): void {
   background: var(--acc);
   border-color: transparent;
   color: var(--acc-ink);
+}
+
+/* 次级但要有存在感：浅色卡片 + 强调色文字，和 WorkShell 的浅色卡片观感一致 */
+.abtn.ctx {
+  background: var(--acc-soft);
+  border-color: var(--bd-strong);
+  color: var(--acc);
 }
 
 .abtn:active { transform: scale(0.98); }

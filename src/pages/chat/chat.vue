@@ -16,6 +16,8 @@ import MossDot from '@/components/moss/MossDot.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import MossMarkdown from '@/components/MossMarkdown.vue'
 import MossFileView from '@/components/MossFileView.vue'
+import WorkBackBar from '@/components/WorkBackBar.vue'
+import { contextLabel, contextPrompt, stashContext, takeContext, type AiContext } from '@/core/ai-context'
 
 type Item =
   | { k: 'user'; text: string; at: string }
@@ -471,6 +473,17 @@ const attaches = ref<PendingAttach[]>([])
 const title = ref('会话')
 const host = ref('')
 const draft = ref('')
+/**
+ * 从任务 / 笔记带过来的引用（P2-3）。
+ *
+ * 只预填、不自动发送：引用是"背景"，问题还得用户自己补。
+ * 读取即清（takeContext），所以刷新页面不会把同一段引用再灌一次。
+ */
+const context = ref<AiContext | undefined>(undefined)
+const contextOpen = ref(false)
+/** 没有会话 id 的入口（任务/笔记「问 AI」）：输入框有引用，但还没选定会话。 */
+const needSession = ref(false)
+const contextText = computed(() => (context.value === undefined ? '' : contextLabel(context.value)))
 const scrollTop = ref(0)
 const sessionId = ref('')
 const sending = ref(false)
@@ -516,6 +529,19 @@ const pendingApproval = computed(() => items.value.find((i) => i.k === 'approval
 
 function back(): void {
   uni.navigateBack()
+}
+
+/**
+ * 「选会话」：没有会话 id 时，把引用重新放回上下文槽，再跳会话列表。
+ *
+ * 会话列表点进对话 → chat 带 id 重新加载 → 再次 takeContext()，引用仍会预填。
+ * 不这样做的话，刚从 takeContext() 读走的引用会在跳转时丢掉。
+ */
+function pickSession(): void {
+  if (!needSession.value) return
+  haptic('light')
+  if (contextOpen.value && context.value !== undefined) stashContext(context.value)
+  uni.reLaunch({ url: '/pages/sessions/sessions' })
 }
 
 /**
@@ -1186,6 +1212,19 @@ onLoad((q) => {
 
   const id = q !== undefined && typeof q['id'] === 'string' ? q['id'] : ''
   sessionId.value = id
+  const fromWorkbench = q !== undefined && q['from'] === 'workbench'
+  needSession.value = fromWorkbench && id === ''
+
+  // P2-3：任务/笔记「问 AI」跳过来时，把引用预填进输入框（不自动发送）
+  const ctx = takeContext()
+  if (ctx !== undefined) {
+    context.value = ctx
+    contextOpen.value = true
+    const prompt = contextPrompt(ctx)
+    if (prompt !== '') {
+      draft.value = draft.value.trim() === '' ? prompt : `${prompt} ${draft.value.trim()}`
+    }
+  }
 
   const row = state.sessions.find((s) => s.id === id)
   title.value = row?.title ?? '会话'
@@ -1210,7 +1249,10 @@ onLoad((q) => {
         errorText.value = `订阅失败：${error instanceof Error ? error.message : String(error)}`
       })
   } else if (id === '') {
-    errorText.value = '没有指定会话'
+    // 从工作台进来的没有会话 id：引用已预填，先回会话列表选一个会话即可继续
+    errorText.value = fromWorkbench
+      ? '从工作台发起：先选一个会话，引用已留在输入框'
+      : '没有指定会话'
   }
 })
 
@@ -1270,6 +1312,8 @@ onUnmounted(() => {
     </view>
 
     <view class="chat-main">
+    <!-- 旧页 ↔ 新壳的返回闭环（P2-3）：对话页原本只有 navigateBack，页面栈为空时是死路 -->
+    <WorkBackBar hint="今天 · 任务 / 日历 / 笔记" />
     <view class="top safe-top">
       <!-- 返回箭头用 CSS 画：uni-app 的 App 端对内联 SVG 支持不稳定，
            之前这里渲染成一片空白（用户看到"左上角有一块空白"）。 -->
@@ -1286,6 +1330,12 @@ onUnmounted(() => {
         </view>
       </view>
       <view class="more mono t3" @tap="chatMenu">···</view>
+    </view>
+
+    <!-- 上下文 chip（P2-3）：说明这轮输入从哪来；可关闭，避免引用干扰后续对话 -->
+    <view v-if="contextOpen && context !== undefined" class="ctx-chip">
+      <text class="ctx-t" @tap="contextOpen = false">{{ contextText }}</text>
+      <text class="ctx-x" @tap.stop="contextOpen = false">×</text>
     </view>
 
     <!-- 分段控件：三段视图切换。手上有"看进度/验收"两种意图，混在一页会互相干扰 -->
@@ -1493,8 +1543,9 @@ onUnmounted(() => {
     </view>
 
     <!-- 发送失败：贴在输入框上方，别让用户找不到 -->
-    <view v-if="errorText.length > 0" class="send-bar">
+    <view v-if="errorText.length > 0" class="send-bar" :class="{ pick: needSession }" @tap="pickSession">
       <text class="send-t">{{ errorText }}</text>
+      <text v-if="needSession" class="send-go">选会话 ›</text>
     </view>
 
     <view class="composer safe-bottom">
@@ -1672,6 +1723,51 @@ onUnmounted(() => {
 }
 
 .tsub { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 10.5px; color: var(--t3); }
+
+/*
+ * 上下文 chip（P2-3）：
+ * 与 WorkShell 的浅色卡片同源——var(--s1)/--bd/--acc-soft，不写死色值。
+ * 单行省略：引用标题可能很长，chip 不该把输入区往下顶。
+ */
+.ctx-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 24px);
+  max-width: var(--content-max, none);
+  margin: 6px auto 2px;
+  padding: 7px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--bd);
+  background: var(--acc-soft);
+  box-sizing: border-box;
+}
+
+.ctx-t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t1);
+}
+
+.ctx-x {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--t3);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ctx-x:active { background: var(--s2); color: var(--t1); }
 
 .flow {
   flex: 1;
@@ -2311,6 +2407,20 @@ onUnmounted(() => {
 }
 
 .send-t { font-size: 12px; color: var(--danger); line-height: 17px; }
+
+/* 没有会话时的引导：整条可点，右侧给一个明确动作词 */
+.send-bar.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.send-bar.pick .send-t { flex: 1; min-width: 0; }
+.send-go {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--acc);
+}
 
 .composer {
   width: 100%;

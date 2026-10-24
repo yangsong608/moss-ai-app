@@ -11,6 +11,8 @@ import WorkShell from '@/components/WorkShell.vue'
 import { useWork } from '@/core/workbench'
 import type { NewsItem } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { dispatchNewsFetch, liveAiHost } from '@/core/ai-dispatch'
+import type { DispatchOutcome } from '@/core/ai-dispatch'
 
 const ALL = '全部'
 
@@ -19,7 +21,15 @@ const { data } = useWork()
 const filter = ref<string>(ALL)
 const fetching = ref(false)
 const lastFetchAt = ref(Date.now() - 12 * 60 * 1000)
-let fetchTimer: ReturnType<typeof setTimeout> | undefined
+/**
+ * 立即检索（P2-2）的页面态：
+ *   - feedHint：常驻状态行（派发中 / 新增几条 / 降级原因）；
+ *   - feedWarn：降级或失败用警示色；
+ *   - feedStop：离开页面时置 true，轮询最多再等一个 tick。
+ */
+const feedHint = ref('')
+const feedWarn = ref(false)
+let feedStop = false
 
 const topics = computed(() => {
   const set = new Set<string>()
@@ -50,20 +60,65 @@ function setFilter(topic: string): void {
   filter.value = topic
 }
 
-function fetchNow(): void {
+/**
+ * 「立即检索」（P2-2）：派发给设备上的 DSH agent 检索当前订阅。
+ *
+ * 流程在 `ai-dispatch.ts`：先 syncNow() 推一轮 → workspace.list → session.create →
+ * session.prompt（要求用 `workbench_news_publish` 写回，topicId 从宿主订阅表解析）→
+ * 每 5s 同步一轮，最多 12 次，等新卡片出现。
+ *
+ * 注意：dsh-workbench 的增量同步不包含 news_items，所以每 tick 除了 syncNow()
+ * 还会用 `wb.news.list` 拉一次快照合并（详见 ai-dispatch 注释）。
+ */
+const targetTopic = computed(() => {
+  if (filter.value !== ALL && topics.value.includes(filter.value)) return filter.value
+  return topics.value[0] ?? '资讯'
+})
+
+async function fetchNow(): Promise<void> {
   if (fetching.value) return
   haptic('light')
+  const topic = targetTopic.value
   fetching.value = true
-  fetchTimer = setTimeout(() => {
-    fetching.value = false
-    lastFetchAt.value = Date.now()
-    haptic('medium')
-    uni.showToast({
-      title: '检索完成 · 0 条新增（M2 接入设备定时源）',
-      icon: 'none',
-      duration: 2200,
+  feedWarn.value = false
+  feedHint.value = `正在派发「${topic}」检索…`
+  feedStop = false
+  try {
+    const host = await liveAiHost()
+    const outcome = await dispatchNewsFetch(host, { topic }, { shouldStop: () => feedStop })
+    applyFeedOutcome(outcome)
+  } catch (error) {
+    feedWarn.value = true
+    feedHint.value = '派发失败：连接层不可用，已保留本机内容。'
+    uni.showModal({
+      title: '立即检索失败',
+      content: `${feedHint.value}\n\n${error instanceof Error ? error.message : String(error)}`,
+      showCancel: false,
+      confirmText: '知道了',
     })
-  }, 1200)
+  } finally {
+    fetching.value = false
+  }
+}
+
+function applyFeedOutcome(outcome: DispatchOutcome): void {
+  if (outcome.status === 'done' || outcome.status === 'timeout') lastFetchAt.value = Date.now()
+  feedWarn.value = outcome.status !== 'done'
+  feedHint.value = outcome.message
+  if (outcome.status === 'done') {
+    haptic('medium')
+    toast(outcome.message)
+    return
+  }
+  if (outcome.status === 'cancelled') return
+  if (outcome.status === 'timeout') {
+    uni.showToast({ title: '已在设备上执行，稍后自动同步', icon: 'none', duration: 2800 })
+    return
+  }
+  const title = outcome.status === 'degraded'
+    ? (outcome.code === 'no-workbench' ? '设备不支持资讯检索' : '需要连接设备')
+    : '立即检索失败'
+  uni.showModal({ title, content: outcome.message, showCancel: false, confirmText: '知道了' })
 }
 
 function openOriginal(item: NewsItem): void {
@@ -86,7 +141,8 @@ watch(data, () => {
 })
 
 onUnmounted(() => {
-  if (fetchTimer !== undefined) clearTimeout(fetchTimer)
+  // 离开页面后不再等设备回写：轮询下一个 tick 就退出（任务本身在设备上继续跑）
+  feedStop = true
 })
 </script>
 
@@ -96,7 +152,8 @@ onUnmounted(() => {
       <view class="news-head">
         <view class="nh-copy">
           <text class="nh-title">AI 摘要 · 3 行内</text>
-          <text class="nh-sub">上次检索 {{ lastFetchLabel }} · 离线可读，联网后自动刷新</text>
+          <text class="nh-sub">上次检索 {{ lastFetchLabel }} · 离线可读 · 立即检索需连接设备</text>
+          <text v-if="feedHint !== ''" class="nh-hint" :class="{ bad: feedWarn }">{{ feedHint }}</text>
         </view>
         <view class="btn primary fetch" :class="{ busy: fetching }" @tap="fetchNow">
           {{ fetching ? '检索中…' : '立即检索' }}
@@ -146,7 +203,7 @@ onUnmounted(() => {
 
       <view v-else class="empty">
         <text>这个订阅下暂时没有内容。</text>
-        <text class="empty-hint">「立即检索」在 M1 只是本地占位，M2 会按定时任务抓取。</text>
+        <text class="empty-hint">「立即检索」会把任务派给已连接的设备，回写后自动出现在这里。</text>
       </view>
     </view>
   </WorkShell>
@@ -178,6 +235,13 @@ onUnmounted(() => {
   line-height: 1.6;
   color: var(--t3);
 }
+/* 常驻状态行：派发中 / 新增条数 / 降级原因都写在这里 */
+.nh-hint {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--t3);
+}
+.nh-hint.bad { color: var(--warn); }
 .fetch {
   flex: 0 0 auto;
   width: auto;
