@@ -26,6 +26,7 @@ import {
   removeNote,
   updateNote,
   useWork,
+  isLocalDomain,
 } from '@/core/workbench'
 import type { Note } from '@/core/workbench'
 import { skinClass, themeClass } from '@/core/store'
@@ -51,6 +52,7 @@ const saveState = ref<'saved' | 'dirty'>('saved')
  *   - aiStop：离开页面时置 true，轮询最多再等一个 tick。
  */
 const aiBusy = ref(false)
+const localOnly = computed(() => isLocalDomain())
 const aiHint = ref('')
 const aiWarn = ref(false)
 let aiStop = false
@@ -526,16 +528,16 @@ onUnmounted(() => {
         </template>
 
         <template v-else>
-          <view class="btn primary ne-ai" :class="{ busy: aiBusy }" @tap="aiPolish">
+          <view v-if="!localOnly" class="btn primary ne-ai" :class="{ busy: aiBusy }" @tap="aiPolish">
             <text class="ne-ai-ic">✦</text>
             <text>{{ aiBusy ? '完善中…' : 'AI 完善' }}</text>
           </view>
           <view class="ne-acts">
-            <view class="ne-act" @tap="aiPolishWithRequirement">
+            <view v-if="!localOnly" class="ne-act" @tap="aiPolishWithRequirement">
               <text class="ne-act-ic">✎</text>
               <text class="ne-act-tx">按要求</text>
             </view>
-            <view class="ne-act" @tap="askAi">
+            <view v-if="!localOnly" class="ne-act" @tap="askAi">
               <text class="ne-act-ic">?</text>
               <text class="ne-act-tx">问 AI</text>
             </view>

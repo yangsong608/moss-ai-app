@@ -147,6 +147,13 @@ export interface WorkDevice {
  *   - 再加一个「仅本机」伪域（不同步）
  *   - 没有任何配对设备时退回演示域，保证首屏可用
  */
+export const LOCAL_DOMAIN_ID = 'dev-local'
+
+/** 是否处于「本地域」：只有任务/日历/专注/笔记，没有会话、资讯与 AI */
+export function isLocalDomain(id = work.deviceId): boolean {
+  return id === LOCAL_DOMAIN_ID
+}
+
 export const workDevices = computed<WorkDevice[]>(() => {
   const local: WorkDevice = { id: 'dev-local', name: '仅本机', sub: '只存在这台手机', online: true, local: true }
   const real = appState.devices
@@ -297,9 +304,26 @@ export function ensureDomain(device = work.deviceId): DomainData {
   return loaded
 }
 
+const DEVICE_KEY = 'moss.work.device'
+
 export function switchDevice(device: string): void {
   work.deviceId = device
   ensureDomain(device)
+  try {
+    uni.setStorageSync(DEVICE_KEY, device)
+  } catch {
+    /* 存不下就只在本次会话生效 */
+  }
+}
+
+/** 冷启动恢复上次选择的域（默认演示域） */
+function restoreDevice(): void {
+  try {
+    const saved = uni.getStorageSync(DEVICE_KEY)
+    if (typeof saved === 'string' && saved.length > 0) work.deviceId = saved
+  } catch {
+    /* 读不到用默认 */
+  }
 }
 
 /** 统一写入口：改内存 → 落盘（M2 在这里接推送队列） */
@@ -358,6 +382,55 @@ export function scheduleTask(id: string, startAt: number, endAt: number): void {
   const iso = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
   const when = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
   updateTask(id, { startAt, endAt, date: iso, when })
+}
+
+/**
+ * 把本地域的数据复制到某个设备域（"上传到设备"）。
+ *
+ * 语义：只增不覆盖——目标域已有的同 id 条目跳过，避免把电脑上的改动冲掉；
+ * 复制后在新域里打脏标记，等 M2 同步推给宿主。
+ */
+export function uploadLocalTo(targetDevice: string): { tasks: number; notes: number; notebooks: number; focus: number } {
+  if (targetDevice === LOCAL_DOMAIN_ID) return { tasks: 0, notes: 0, notebooks: 0, focus: 0 }
+  const src = ensureDomain(LOCAL_DOMAIN_ID)
+  const dst = ensureDomain(targetDevice)
+  let tasks = 0, notes = 0, notebooks = 0, focus = 0
+
+  const taskIds = new Set(dst.tasks.map((t) => t.id))
+  for (const t of src.tasks) {
+    if (taskIds.has(t.id)) continue
+    dst.tasks.push({ ...t, dev: deviceName(targetDevice), updatedAt: Date.now(), sync: true })
+    markDirty(targetDevice, 'tasks', t.id, 'upsert')
+    tasks += 1
+  }
+
+  const noteIds = new Set(dst.notes.map((n) => n.id))
+  for (const n of src.notes) {
+    if (noteIds.has(n.id)) continue
+    dst.notes.push({ ...n, updatedAt: Date.now() })
+    markDirty(targetDevice, 'notes', n.id, 'upsert')
+    notes += 1
+  }
+
+  const nbNames = new Set(dst.notebooks.map((n) => n.name))
+  for (const nb of src.notebooks) {
+    if (nbNames.has(nb.name)) continue
+    const copy = { ...nb, id: uid() }
+    dst.notebooks.push(copy)
+    markDirty(targetDevice, 'notebooks', copy.id, 'upsert')
+    notebooks += 1
+  }
+
+  const focusIds = new Set(dst.focus.map((f) => f.id))
+  for (const f of src.focus) {
+    if (focusIds.has(f.id)) continue
+    dst.focus.push({ ...f })
+    markDirty(targetDevice, 'focus_sessions', f.id, 'upsert')
+    focus += 1
+  }
+
+  writeDomain(targetDevice, dst)
+  return { tasks, notes, notebooks, focus }
 }
 
 /* ─────────── 提醒（本地闹铃） ─────────── */
@@ -580,5 +653,6 @@ export function normalizeDevice(): void {
   ensureDomain()
 }
 
-/* 首屏播种 */
+/* 首屏：恢复上次设备域 + 播种 */
+restoreDevice()
 ensureDomain()

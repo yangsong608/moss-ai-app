@@ -22,6 +22,7 @@ import {
   type Priority,
   type Task,
   type TaskStatus,
+  isLocalDomain,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
 import { stashContext } from '@/core/ai-context'
@@ -30,6 +31,8 @@ const props = defineProps<{
   visible: boolean
   taskId: string
 }>()
+
+const localOnly = computed(() => isLocalDomain())
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
@@ -409,7 +412,7 @@ function askAi(): void {
 
           <view class="actions">
             <view class="abtn primary" @tap="aiSplit"><text>让 AI 拆解</text></view>
-            <view class="abtn ctx" @tap="askAi"><text>问 AI</text></view>
+            <view v-if="!localOnly" class="abtn ctx" @tap="askAi"><text>问 AI</text></view>
             <view class="abtn" @tap="onToggleDone"><text>{{ t.done ? '恢复未完成' : '标记完成' }}</text></view>
           </view>
           <view class="actions del-actions">

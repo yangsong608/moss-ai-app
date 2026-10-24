@@ -10,7 +10,7 @@ import { pendingCount, lastSyncAt, stateOf, syncStatus } from '@/core/sync-queue
 import { syncNow } from '@/core/sync-engine'
 import { computed, ref } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
-import { deviceName, domainStats, switchDevice, useWork, work, workDevices } from '@/core/workbench'
+import { deviceName, domainStats, isLocalDomain, uploadLocalTo, useWork, work, workDevices } from '@/core/workbench'
 import { markUserPreference, state } from '@/core/store'
 import { haptic } from '@/core/haptic'
 
@@ -30,6 +30,29 @@ const lastSyncText = computed(() => {
   const mins = Math.max(0, Math.round((Date.now() - at) / 60000))
   return mins < 1 ? '刚刚' : `${mins} 分钟前`
 })
+const localOnly = computed(() => isLocalDomain())
+
+/** 本地域 → 上传到某台设备（只增不覆盖） */
+function uploadTo(): void {
+  const targets = workDevices.value.filter((d) => !d.local)
+  if (targets.length === 0) {
+    uni.showToast({ title: '还没有已配对的设备', icon: 'none' })
+    return
+  }
+  uni.showActionSheet({
+    itemList: targets.map((d) => d.name),
+    success: (res) => {
+      const target = targets[res.tapIndex]
+      if (target === undefined) return
+      const r = uploadLocalTo(target.id)
+      uni.showToast({
+        title: `已上传 任务${r.tasks} 笔记${r.notes} 专注${r.focus}`,
+        icon: 'none',
+      })
+    },
+  })
+}
+
 const conflicts = computed(() => data.value.tasks.filter((t) => t.conflict).length)
 
 /* ── 同步面板（P1-4）：真实队列 + 手动同步 ── */
@@ -96,15 +119,6 @@ function pickLight(light: boolean): void {
   state.light = light
   markUserPreference('light')
   toast(light ? '已切换浅色' : '已切换深色')
-}
-
-function cycleDevice(): void {
-  const index = workDevices.value.findIndex((d) => d.id === work.deviceId)
-  const next = workDevices.value[(index + 1) % workDevices.value.length]
-  if (next === undefined) return
-  haptic('light')
-  switchDevice(next.id)
-  toast(`已切到「${next.name}」的数据域`)
 }
 
 function go(url: string, label: string): void {

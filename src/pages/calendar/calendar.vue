@@ -1230,8 +1230,8 @@ function endDrag(commit: boolean): void {
     return
   }
   const span = taskSpan(task)
-  // 时长不变：新起点 + 原时长（跨天区间也一起搬走）
-  const duration = Math.max(15 * 60_000, d.duration)
+  // 时长不变：以 taskSpan 为唯一来源（拖动期间任务被别处改过也不会算错）
+  const duration = Math.max(15 * 60_000, span === undefined ? d.duration : span.end - span.start)
   if (span !== undefined && span.start === start && span.end - span.start === duration) {
     toast('位置没变')
     return

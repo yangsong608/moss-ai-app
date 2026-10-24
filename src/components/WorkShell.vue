@@ -10,7 +10,7 @@
  */
 import { computed, onMounted } from 'vue'
 import { skinClass, themeClass, state } from '@/core/store'
-import { workDevices, work, switchDevice, normalizeDevice } from '@/core/workbench'
+import { workDevices, work, normalizeDevice, isLocalDomain } from '@/core/workbench'
 import { syncStatus } from '@/core/sync-queue'
 import { startAutoSync } from '@/core/sync-engine'
 import { haptic } from '@/core/haptic'
@@ -34,6 +34,11 @@ const TABS = [
   { key: 'mine', label: '我的', glyph: '☰', url: '/pages/mine/mine' },
 ] as const
 
+const local = computed(() => isLocalDomain())
+
+/** 本地域没有「会话」「资讯」（它们必须连电脑），其它 Tab 照常 */
+const tabs = computed(() => TABS.filter((t) => !local.value || (t.key !== 'sessions' && t.key !== 'news')))
+
 const currentDevice = computed(() => workDevices.value.find((d) => d.id === work.deviceId) ?? workDevices.value[0])
 
 onMounted(() => {
@@ -45,12 +50,6 @@ function go(t: (typeof TABS)[number]): void {
   if (t.key === props.active) return
   haptic('light')
   uni.reLaunch({ url: t.url })
-}
-
-function pick(device: string): void {
-  if (device === work.deviceId) return
-  haptic('light')
-  switchDevice(device)
 }
 
 /** 回到设备与配对页（换设备/重新配对） */
@@ -78,7 +77,7 @@ const syncText = computed(() => {
     <!-- 导航（手机底部 / 平板左侧） -->
     <view class="ws-nav">
       <view
-        v-for="t in TABS"
+        v-for="t in tabs"
         :key="t.key"
         class="ws-tab"
         :class="{ on: props.active === t.key }"
@@ -93,7 +92,10 @@ const syncText = computed(() => {
       <!-- 顶栏 -->
       <view class="ws-top safe-top">
         <view class="ws-title">
-          <text class="ws-t">{{ props.title }}</text>
+          <view class="ws-title-row">
+            <text class="ws-t">{{ props.title }}</text>
+            <text v-if="local" class="ws-local">本地域</text>
+          </view>
           <text v-if="props.sub" class="ws-s">{{ props.sub }}</text>
         </view>
         <view class="ws-actions">
@@ -165,7 +167,13 @@ const syncText = computed(() => {
   padding: 14px 18px 8px;
 }
 .ws-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ws-title-row { display: flex; align-items: center; gap: 8px; }
 .ws-t { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+.ws-local {
+  font-size: 10px; padding: 2px 7px; border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+}
 .ws-s { font-size: 11px; color: var(--t3); }
 .ws-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .ws-sync {
