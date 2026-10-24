@@ -240,17 +240,8 @@ function addQuick(e?: any): void {
 /* ── 清单 / 看板 / 历史 / 筛选 ─────────────────────────────────────── */
 
 
-type FilterMode = 'all' | 'high' | 'sub'
-const filterMode = ref<FilterMode>('all')
-const FILTER_LABEL: Record<FilterMode, string> = { all: '筛选', high: '高优先', sub: '有子待办' }
 
 
-const filtered = computed(() => {
-  const list = data.value.tasks
-  if (filterMode.value === 'high') return list.filter((t) => t.pri === 'high')
-  if (filterMode.value === 'sub') return list.filter((t) => t.sub.length > 0)
-  return list
-})
 
 interface GroupView {
   key: TaskGroup
@@ -261,7 +252,7 @@ interface GroupView {
 }
 
 const groups = computed<GroupView[]>(() => {
-  const list = filtered.value
+  const list = data.value.tasks
   // 「今天」= 日历口径的当日聚合：跨天任务落在今天的那一段也在这组
   const todays = tasksOnDay(list, todayIso.value).filter((t) => !t.done)
   const todaySet = new Set(todays.map((t) => t.id))
@@ -370,7 +361,7 @@ const todayMD = computed(() => {
 
 /** 只看今天：日历口径的当日集合，去掉已完成，按开始时间升序（无时间的排最后） */
 const todayCards = computed<Task[]>(() => {
-  const onDay = tasksOnDay(filtered.value, todayIso.value).filter((t) => !t.done)
+  const onDay = tasksOnDay(data.value.tasks, todayIso.value).filter((t) => !t.done)
   return onDay.slice().sort((a, b) => {
     const sa = taskSpan(a)?.start ?? Number.MAX_SAFE_INTEGER
     const sb = taskSpan(b)?.start ?? Number.MAX_SAFE_INTEGER
@@ -499,12 +490,6 @@ function onCardTouEnd(e: any): void {
   goCard(dy < 0 ? 1 : -1)
 }
 
-function cycleFilter(): void {
-  const order: FilterMode[] = ['all', 'high', 'sub']
-  const idx = order.indexOf(filterMode.value)
-  filterMode.value = order[(idx + 1) % order.length]!
-  haptic('light')
-}
 
 /* ── 任务动作与详情 ────────────────────────────────────────────────── */
 
@@ -736,16 +721,7 @@ function doClear(): void {
         </view>
       </view>
 
-      <!-- 只保留台历视图；右侧留筛选 -->
-      <view class="tools">
-        <view class="sp" />
-        <view class="fbtn" :class="{ on: filterMode !== 'all' }" @tap="cycleFilter">
-          <text>{{ FILTER_LABEL[filterMode] }}</text>
-        </view>
-      </view>
-
-      <!-- 清单：只当日 + 按时间排序 + 台历翻页卡片 -->
-      <view :key="`list-${filterMode}`" class="calwrap">
+      <view class="calwrap">
         <view class="calbar">
           <view class="caltoggle">
             <view class="ct-btn" :class="{ on: cardMode }" role="button" aria-label="翻页卡片" @tap="cardMode = true">
@@ -1270,61 +1246,6 @@ function doClear(): void {
 
 .dim { color: var(--t3); }
 .sp { flex: 1; }
-
-/* ── 视图切换与筛选 ─────────────────────────────────────────────── */
-
-.tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 11px;
-  border: 1px solid var(--bd);
-  background: var(--s2);
-}
-
-.seg-btn {
-  height: 27px;
-  padding: 0 12px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--t3);
-}
-
-.seg-btn.on {
-  background: var(--s1);
-  color: var(--acc);
-  box-shadow: inset 0 0 0 1px var(--bd);
-}
-
-.fbtn {
-  margin-left: auto;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid var(--bd);
-  background: var(--s1);
-  color: var(--t3);
-  display: flex;
-  align-items: center;
-  font-size: 10px;
-}
-
-.fbtn.on {
-  color: var(--acc);
-  border-color: var(--bd-strong);
-  background: var(--acc-soft);
-}
-
-/* ── 分组与任务行 ───────────────────────────────────────────────── */
 
 /* ── 台历翻页页：一张卡 = 一页日历 ─────────────────────────────────── */
 .calpages {
