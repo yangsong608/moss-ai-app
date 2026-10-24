@@ -1,0 +1,92 @@
+<!doctype html>
+<!--
+  三档画幅断言 harness（验收用，不随产品交付）：
+    在三个固定画幅 iframe 里跑布局/交互断言，把结果写进 <pre id="results">。
+    运行：node verify.mjs（内部用 Chrome headless --dump-dom 读取结果）
+  断言按可见文本定位，不依赖 index.html 的 class 命名。
+-->
+<meta charset="utf-8">
+<title>prototype verify harness</title>
+<body>
+<pre id="results">RUNNING</pre>
+<script>
+const CASES = [
+  { name: 'phone', w: 390, h: 844, layout: 'bottom' },
+  { name: 'tablet-portrait', w: 820, h: 1180, layout: 'left' },
+  { name: 'tablet-landscape', w: 1280, h: 800, layout: 'left+right' },
+]
+const TABS = [
+  ['今天', ['今天', '收件箱']],
+  ['日历', ['周', '安排']],
+  ['专注', ['专注', '25']],
+  ['资讯', ['检索', '订阅']],
+  ['我的', ['笔记', '设置']],
+]
+const out = []
+const ok = (cond, label) => out.push(`${cond ? 'PASS' : 'FAIL'} ${label}`)
+
+function makeFrame(c) {
+  return new Promise((resolve) => {
+    const f = document.createElement('iframe')
+    f.style.cssText = `width:${c.w}px;height:${c.h}px;border:0;display:block`
+    f.onload = () => setTimeout(() => resolve(f), 250)
+    f.src = 'index.html'
+    document.body.appendChild(f)
+  })
+}
+
+async function runCase(c) {
+  const f = await makeFrame(c)
+  const win = f.contentWindow
+  const doc = win.document
+  out.push(`CASE ${c.name} ${c.w}x${c.h} (nav=${c.layout})`)
+
+  const errs = []
+  win.addEventListener('error', (e) => errs.push(String(e.message)))
+  ok(errs.length === 0, `${c.name} 无 JS 报错`)
+
+  for (const [tab, expect] of TABS) {
+    const click = (t) => {
+      const els = [...doc.querySelectorAll('a,button,div,span,li')].filter(
+        (e) => e.textContent.trim() === t && e.offsetParent !== null && e.getBoundingClientRect().width > 0,
+      )
+      if (els.length === 0) return false
+      const boxes = els.map((e) => ({ el: e, r: e.getBoundingClientRect() }))
+      boxes.sort((a, b) => a.r.width * a.r.height - b.r.width * b.r.height)
+      boxes[0].el.click()
+      return true
+    }
+    ok(click(tab), `${c.name} Tab「${tab}」可点击`)
+    await new Promise((r) => setTimeout(r, 80))
+    const bodyText = doc.body.innerText
+    ok(expect.some((k) => bodyText.includes(k)), `${c.name} 「${tab}」渲染（${expect.join('/')}）`)
+  }
+
+  const nav = [...doc.querySelectorAll('a,button,div,span,li')]
+    .filter((e) => e.textContent.trim() === '今天' && e.offsetParent !== null)
+    .map((e) => e.getBoundingClientRect().toJSON())
+    .sort((a, b) => a.width * a.height - b.width * b.height)[0]
+  if (nav) {
+    if (c.layout === 'bottom') ok(nav.y > c.h * 0.75, `${c.name} 导航在底部（y=${Math.round(nav.y)}）`)
+    else ok(nav.x < 160, `${c.name} 导航在左侧（x=${Math.round(nav.x)}）`)
+    if (c.layout === 'left+right') {
+      const right = [...doc.querySelectorAll('*')].some((e) => {
+        if (e.children.length > 0) return false
+        return /详情|队列|安排|冲突副本/.test(e.textContent ?? '') && e.getBoundingClientRect().x > c.w * 0.58
+      })
+      ok(right, `${c.name} 横屏右栏存在`)
+    }
+  } else {
+    ok(false, `${c.name} 未找到导航 Tab「今天」`)
+  }
+  f.remove()
+}
+
+;(async () => {
+  for (const c of CASES) await runCase(c)
+  const fails = out.filter((l) => l.startsWith('FAIL')).length
+  out.push(fails === 0 ? 'ALL_PASS' : `TOTAL_FAIL ${fails}`)
+  document.getElementById('results').textContent = out.join('\n')
+})()
+</script>
+</body>
