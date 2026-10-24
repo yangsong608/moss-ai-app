@@ -785,6 +785,17 @@ function barTouchMove(e: any): void {
 }
 
 function barTouchEnd(e?: any): void {
+  /*
+   * "幽灵点击"：H5 在 touchend 之后会按落点补发一次 click。
+   *   - 长按弹了菜单：这一下会砸在遮罩上，菜单"闪一下就没了"；
+   *   - 拖完松手：这一下会落在目标格上，等于刚搬完又新建一条空任务。
+   * 这两种情况都必须把抬手事件吞掉（preventDefault 能阻止后续的合成 click）。
+   * 普通点按不能吞：任务详情、点格子新建全靠它。
+   */
+  if (e !== undefined && (menuOpen.value || drag.value !== null)) {
+    const pe = e as { preventDefault?: () => void; cancelable?: boolean }
+    if (typeof pe.preventDefault === 'function' && pe.cancelable !== false) pe.preventDefault()
+  }
   if (drag.value !== null) {
     // 以抬手那一点的坐标收尾（最后一次 touchmove 可能比手指落后一帧）
     const p = e === undefined ? null : pointOf(e)

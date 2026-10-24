@@ -374,6 +374,37 @@ onMounted(selectFirstForWide)
       </scroll-view>
 
       <view class="workspace">
+        <!-- 宽屏（PC 档）笔记本列表：手机走上面的 chips，两处共用同一套筛选状态 -->
+        <view class="nb-col">
+          <view class="nb-head">
+            <text class="nb-head-t">笔记本</text>
+            <text class="nb-head-n mono">{{ data.notes.length }}</text>
+          </view>
+          <view class="nb-row" :class="{ on: filter === ALL }" @tap="setFilter(ALL)">
+            <text class="nb-name">全部</text>
+            <text class="nb-count mono">{{ data.notes.length }}</text>
+          </view>
+          <view class="nb-row" :class="{ on: filter === FAV }" @tap="setFilter(FAV)">
+            <text class="nb-name">收藏</text>
+            <text class="nb-count mono">{{ favCount }}</text>
+          </view>
+          <view
+            v-for="nb in notebookRows"
+            :key="nb.name"
+            class="nb-row"
+            :class="{ on: filter === nb.name }"
+            @tap="setFilter(nb.name)"
+            @longpress="openNotebookMenu(nb.name)"
+          >
+            <text class="nb-name">{{ nb.name }}</text>
+            <text class="nb-count mono">{{ nb.count }}</text>
+            <view class="nb-more" @tap.stop="openNotebookMenu(nb.name)"><text>⋯</text></view>
+          </view>
+          <view class="nb-add" @tap="promptNewNotebook('only')">
+            <text>＋ 新建笔记本</text>
+          </view>
+        </view>
+
         <view class="list-col">
           <view v-if="filteredNotes.length === 0" class="empty">
             <text>这里还没有笔记。</text>
@@ -532,6 +563,61 @@ onMounted(selectFirstForWide)
 
 .workspace { display: flex; flex-direction: column; min-width: 0; }
 .list-col { flex: 1; min-width: 0; }
+
+/* 笔记本竖列表：只有 PC 档显示；手机由顶部 chips 承担同一职责 */
+.nb-col { display: none; }
+.nb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 8px;
+}
+.nb-head-t { font-size: 11.5px; font-weight: 700; color: var(--t2); letter-spacing: 0.04em; }
+.nb-head-n { margin-left: auto; font-size: 9.5px; color: var(--t3); }
+.nb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 9px;
+  color: var(--t2);
+  font-size: 12px;
+}
+.nb-row:active { background: var(--s2); }
+.nb-row.on { background: var(--acc-soft); color: var(--acc); font-weight: 600; }
+.nb-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.nb-count { margin-left: auto; font-size: 9.5px; color: var(--t3); }
+.nb-row.on .nb-count { color: var(--acc); }
+.nb-more {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--t3);
+  font-size: 13px;
+  line-height: 1;
+}
+.nb-more:active { background: var(--s3); color: var(--t1); }
+.nb-add {
+  margin-top: 6px;
+  min-height: 34px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+  border: 1px dashed var(--bd);
+  color: var(--t3);
+  font-size: 11.5px;
+}
+.nb-add:active { color: var(--acc); border-color: var(--bd-strong); }
 
 /* ── 卡片：高度完全由内容撑开（不写 height，标题 2 行 / 摘要 3 行截断） ── */
 .note-card {
@@ -790,5 +876,27 @@ onMounted(selectFirstForWide)
   .rd-back { display: none; }
   .read-placeholder { display: flex; }
   .head-new { height: 34px; min-height: 34px; }
+}
+
+/* ── PC 档（≥1100）：笔记本列表竖排在左，顶部 chips 收起 ── */
+@media (min-width: 1100px) {
+  .nb-col {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 176px;
+    width: 176px;
+    padding: 10px 8px 12px;
+    border-radius: var(--r-md);
+    background: var(--s1);
+    border: 1px solid var(--bd);
+    box-sizing: border-box;
+  }
+  .chips { display: none; }
+  .list-col {
+    flex: 0 0 320px;
+    width: 320px;
+  }
+  /* 少了 chips 一条，阅读卡可以再高一点，但仍要给底栏留空间 */
+  .reader { height: calc(100vh - 286px); }
 }
 </style>
