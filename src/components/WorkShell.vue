@@ -64,6 +64,8 @@ function toggleTheme(): void {
 }
 
 const syncText = computed(() => {
+  // 本地域永远不联网：明确告诉用户数据只在手机里
+  if (local.value) return syncStatus.pending > 0 ? `本地存储 · 待整理 ${syncStatus.pending}` : '本地存储 · 不联网'
   // 离线不是"不可用"：数据全在本地，只是不同步
   const base = currentDevice.value?.online ? '已同步' : '离线 · 本地可用'
   const extra = syncStatus.pending > 0 ? ` · 待推 ${syncStatus.pending}` : ''
