@@ -8,7 +8,7 @@
  */
 import { computed } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
-import { DEVICES, deviceName, domainStats, switchDevice, useWork, work } from '@/core/workbench'
+import { deviceName, domainStats, switchDevice, useWork, work, workDevices } from '@/core/workbench'
 import { markUserPreference, state } from '@/core/store'
 import { haptic } from '@/core/haptic'
 
@@ -17,7 +17,7 @@ const PROTOCOL_LABEL = 'DSH Link · v1'
 
 const { data } = useWork()
 
-const currentDevice = computed(() => DEVICES.find((d) => d.id === work.deviceId) ?? DEVICES[0])
+const currentDevice = computed(() => workDevices.value.find((d) => d.id === work.deviceId) ?? workDevices.value[0])
 /** state 里可能是 auto：按当前实际生效的皮肤高亮，避免两个选项都不亮 */
 const activeSkin = computed<'moss' | '550w'>(() => (state.skinMode === '550w' ? '550w' : 'moss'))
 const stats = computed(() => domainStats(data.value))
@@ -55,8 +55,8 @@ function pickLight(light: boolean): void {
 }
 
 function cycleDevice(): void {
-  const index = DEVICES.findIndex((d) => d.id === work.deviceId)
-  const next = DEVICES[(index + 1) % DEVICES.length]
+  const index = workDevices.value.findIndex((d) => d.id === work.deviceId)
+  const next = workDevices.value[(index + 1) % workDevices.value.length]
   if (next === undefined) return
   haptic('light')
   switchDevice(next.id)

@@ -47,6 +47,8 @@ const todayIso = isoDay()
 const titleDraft = ref('')
 const noteDraft = ref('')
 const subDraft = ref('')
+/** 同快速记录：@confirm 与最后一击 input 的先后顺序不可靠，用 key 重建输入框清空更稳。 */
+const subKey = ref(0)
 
 /** 只在"打开 / 换任务"时灌草稿：跟随每次任务改动会把正在输入的备注冲掉。 */
 watch(
@@ -96,9 +98,19 @@ function close(): void {
 
 /* ── 标题 / 备注 ───────────────────────────────────────────────────── */
 
-function commitTitle(): void {
+/**
+ * 读事件里的值而不是只读 ref：uni-app 的 @confirm 在最后一击时可能比 v-model 早一帧，
+ * 直接读 quick.value / titleDraft.value 会丢掉最后输入的那个字（实测真会）。
+ */
+function fieldValue(e: any, fallback: string): string {
+  const raw = e?.detail?.value
+  return typeof raw === 'string' ? raw : fallback
+}
+
+function commitTitle(e?: any): void {
   if (!alive.value) return
-  const next = titleDraft.value.trim()
+  const next = fieldValue(e, titleDraft.value).trim()
+  titleDraft.value = next
   if (next === '') {
     titleDraft.value = t.value.title
     return
@@ -109,10 +121,12 @@ function commitTitle(): void {
   toast('标题已更新 · 待同步')
 }
 
-function commitNote(): void {
+function commitNote(e?: any): void {
   if (!alive.value) return
-  if (noteDraft.value === t.value.note) return
-  updateTask(props.taskId, { note: noteDraft.value })
+  const next = fieldValue(e, noteDraft.value)
+  noteDraft.value = next
+  if (next === t.value.note) return
+  updateTask(props.taskId, { note: next })
   toast('备注已存本机')
 }
 
@@ -143,9 +157,9 @@ function pickPri(p: Priority): void {
 function applyDate(next: string): void {
   if (!alive.value) return
   const cur = t.value
-  let when = cur.when
-  if (next === todayIso) when = '今天'
-  else if (!/^\d{1,2}:\d{2}$/.test(cur.when)) when = md(next)
+  // 带具体时间的任务改到哪天都保留时间；否则整条会从日历网格里消失
+  const timed = /^\d{1,2}:\d{2}$/.test(cur.when)
+  const when = timed ? cur.when : next === todayIso ? '今天' : md(next)
   updateTask(cur.id, { date: next, when })
   haptic('light')
   toast(`日期已改为 ${next === todayIso ? '今天' : md(next)}`)
@@ -177,11 +191,12 @@ function onSubToggle(subId: string): void {
   haptic('light')
 }
 
-function addSub(): void {
-  const v = subDraft.value.trim()
+function addSub(e?: any): void {
+  const v = fieldValue(e, subDraft.value).trim()
   if (!alive.value || v === '') return
   updateTask(props.taskId, { sub: [...t.value.sub, { id: uid(), title: v, done: false }] })
   subDraft.value = ''
+  subKey.value += 1
   haptic('light')
   toast('已加子待办')
 }
@@ -309,6 +324,7 @@ function aiSplit(): void {
             <view class="subadd">
               <view class="plus"><text>＋</text></view>
               <input
+                :key="subKey"
                 v-model="subDraft"
                 class="subin"
                 placeholder="添加子待办，回车保存"

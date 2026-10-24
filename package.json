@@ -12,7 +12,8 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "typecheck:protocol": "npm --prefix protocol run typecheck",
     "test:protocol": "npm --prefix protocol run test",
-    "check": "npm run typecheck && npm run test:protocol && npm run build:h5"
+    "check": "npm run typecheck && npm run test:protocol && npm run build:h5 && npm run smoke",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020620260917001",

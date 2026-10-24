@@ -12,7 +12,6 @@ import { computed, reactive, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
 import {
-  DEVICES,
   WEEKDAYS,
   addTask,
   clearDone,
@@ -25,6 +24,7 @@ import {
   todayTasks,
   useWork,
   work,
+  workDevices,
   type Task,
   type TaskGroup,
   type TaskStatus,
@@ -44,7 +44,8 @@ const doneToday = computed(() => data.value.tasks.filter((t) => t.done && t.date
 const pendingFocus = computed(() => todayTasks(data.value.tasks).filter((t) => t.status !== 'waiting').length)
 const highPri = computed(() => todayTasks(data.value.tasks).filter((t) => t.pri === 'high').length)
 const pendingSync = computed(() => data.value.tasks.filter((t) => t.sync && !t.done).length)
-const onlineDevices = computed(() => DEVICES.filter((d) => d.online).length)
+// 设备域列表由 WorkShell / workbench 统一提供（配对后是真实宿主，未配对时退回演示域）
+const onlineDevices = computed(() => workDevices.value.filter((d) => d.online).length)
 const sub = computed(() => `${weekday} · 今日 ${todayTasks(data.value.tasks).length} 项`)
 
 const ringStyle = computed(() => {
@@ -61,9 +62,17 @@ function toast(title: string): void {
 const quick = ref('')
 const quickDev = ref(work.deviceId)
 const inputFocus = ref(false)
+/**
+ * 快速输入框的重建计数。
+ *
+ * 只在 @confirm 里把 quick 置空并不总能清掉输入框：最后一击的 input 事件可能晚于
+ * confirm 到达，把旧文本又写回 DOM（实测按得越快越容易复现）。换 key 重建一次
+ * 输入框是唯一与框架更新顺序无关的做法，代价只有一次重挂载。
+ */
+const quickKey = ref(0)
 
 const quickDevName = computed(
-  () => DEVICES.find((d) => d.id === quickDev.value)?.name ?? '本机',
+  () => workDevices.value.find((d) => d.id === quickDev.value)?.name ?? deviceName(),
 )
 
 /** 设备域切换后，快速记录跟随当前域；详情抽屉也要收起（可能跨域找不到任务）。 */
@@ -75,9 +84,18 @@ watch(
   },
 )
 
+/** 配对 / 解绑后域列表会变：旧目标可能已经不存在，回收当前域。 */
+watch(
+  () => workDevices.value.map((d) => d.id).join(','),
+  () => {
+    if (!workDevices.value.some((d) => d.id === quickDev.value)) quickDev.value = work.deviceId
+  },
+)
+
 function cycleQuickDev(): void {
-  const idx = DEVICES.findIndex((d) => d.id === quickDev.value)
-  const next = DEVICES[(idx + 1) % DEVICES.length]!
+  const list = workDevices.value
+  const idx = list.findIndex((d) => d.id === quickDev.value)
+  const next = list[(idx + 1) % list.length]!
   quickDev.value = next.id
   haptic('light')
   toast(next.id === work.deviceId ? `快速记录 → ${next.name}` : `快速记录 → ${next.name}（保存时切域）`)
@@ -89,8 +107,10 @@ function keepFocus(): void {
   setTimeout(() => { inputFocus.value = true }, 30)
 }
 
-function addQuick(): void {
-  const title = quick.value.trim()
+function addQuick(e?: any): void {
+  // @confirm 的 detail.value 比 v-model 更接近真实输入（避免最后一个字被吃掉）
+  const raw = e?.detail?.value
+  const title = String(typeof raw === 'string' ? raw : quick.value).trim()
   if (title === '') {
     toast('先写一句要记的事')
     return
@@ -99,6 +119,7 @@ function addQuick(): void {
   if (quickDev.value !== work.deviceId) switchDevice(quickDev.value)
   addTask(title, { date: TODAY, when: '今天', dev: deviceName() })
   quick.value = ''
+  quickKey.value += 1
   haptic('light')
   toast(`已记下 · ${deviceName()}`)
   keepFocus()
@@ -284,6 +305,7 @@ function doClear(): void {
         <view class="quickin">
           <text class="qplus">＋</text>
           <input
+            :key="quickKey"
             v-model="quick"
             class="qin"
             placeholder="记一件事，回车即存…"

@@ -758,6 +758,9 @@ onUnmounted(() => {
   }
   .notes-page.is-editing .ed-main { padding-bottom: 8px; }
   .notes-page.is-editing .ed-body { min-height: 160px; }
+  .notes-page.is-editing .ed-foot {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
 }
 
 /* ── 平板 / 桌面：左右两栏 ── */

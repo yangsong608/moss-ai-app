@@ -12,8 +12,9 @@
  *   - 0 秒重置不写数据，避免统计里出现一堆 0 分钟记录
  */
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { onHide } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
-import { addFocus, useWork, domainStats } from '@/core/workbench'
+import { addFocus, updateTask, useWork, domainStats } from '@/core/workbench'
 import type { Task } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
 
@@ -30,6 +31,8 @@ const focusTaskId = ref('')
 
 let endsAt = 0
 let tick: ReturnType<typeof setInterval> | undefined
+/** 已为当前这一轮落过中断账：onHide + onUnmounted 可能连续触发，不能重复记账 */
+let settled = false
 
 const totalSec = computed(() => presetMin.value * 60)
 const elapsedSec = computed(() => Math.max(0, totalSec.value - leftSec.value))
@@ -116,6 +119,11 @@ function finish(): void {
 /** 中断落账；返回落账分钟数（不足 1 分钟不落） */
 function settleInterrupt(): number {
   if (phase.value !== 'running' && phase.value !== 'paused') return 0
+  if (settled) return 0
+  settled = true
+  if (phase.value === 'running') leftSec.value = readLeft()
+  stopTick()
+  phase.value = 'paused'
   const minutes = Math.floor(elapsedSec.value / 60)
   if (minutes < 1) return 0
   addFocus(focusTask.value?.id ?? '', minutes, false)
@@ -131,11 +139,13 @@ function toggleRun(): void {
     return
   }
   if (phase.value === 'paused') {
+    settled = false
     endsAt = Date.now() + leftSec.value * 1000
     phase.value = 'running'
     startTick()
     return
   }
+  settled = false
   leftSec.value = totalSec.value
   endsAt = Date.now() + leftSec.value * 1000
   phase.value = 'running'
@@ -148,6 +158,7 @@ function resetTimer(): void {
   stopTick()
   phase.value = 'idle'
   leftSec.value = totalSec.value
+  settled = false
   toast(minutes > 0 ? `已中断 · 记录 ${minutes} 分钟` : '已重置')
 }
 
@@ -159,8 +170,24 @@ function applyPreset(minutes: number): void {
   presetMin.value = minutes
   phase.value = 'idle'
   leftSec.value = minutes * 60
+  settled = false
   if (recorded > 0) toast(`已切到 ${minutes} 分钟 · 上一轮记录 ${recorded} 分钟`)
 }
+
+/**
+ * 完成后直接把任务标记完成（专注 → 任务的唯一联动）。
+ * 不自动置 done：专注 ≠ 任务完成，给用户一下明确的动作。
+ */
+function markTaskDone(): void {
+  const t = focusTask.value
+  if (t === null || t.done) return
+  updateTask(t.id, { done: true })
+  haptic('medium')
+  toast(`已标记「${t.title}」完成`)
+}
+
+/* 离开页面/切后台时把已专注的部分落账，避免中断即丢；settleInterrupt 自身幂等 */
+onHide(() => { settleInterrupt() })
 
 function pickTask(id: string): void {
   haptic('light')
@@ -214,6 +241,11 @@ onUnmounted(() => {
           <view class="timer-btns">
             <view class="btn primary" @tap="toggleRun">{{ primaryLabel }}</view>
             <view class="btn" @tap="resetTimer">重置</view>
+          </view>
+
+          <view v-if="phase === 'done' && focusTask && !focusTask.done" class="done-row">
+            <text class="done-t">这一轮是为了「{{ focusTask.title }}」</text>
+            <view class="done-btn" @tap="markTaskDone"><text>标记任务完成</text></view>
           </view>
 
           <view class="task-pick" @tap="pickerOpen = true">
@@ -659,5 +691,28 @@ onUnmounted(() => {
     border-radius: var(--r-lg);
     padding-bottom: 18px;
   }
+}
+.done-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--acc-soft);
+  border: 1px solid var(--bd-strong);
+}
+.done-t { flex: 1; min-width: 0; font-size: 11.5px; color: var(--t2); }
+.done-btn {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  background: var(--acc);
+  color: var(--acc-ink);
+  font-size: 11.5px;
+  font-weight: 600;
 }
 </style>

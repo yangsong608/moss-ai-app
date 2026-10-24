@@ -7,6 +7,12 @@
  * 加一条也在这里（时间选择器决定它会不会出现在网格里）。
  *
  * 数据只读 @/core/workbench 的 DomainData；改期 / 改状态在共用详情抽屉里完成。
+ *
+ * 移动手势（P0-3，手机没有鼠标拖拽，用"长按 → 落点"替代）：
+ *   - 长按任务条进入移动模式，顶部出现提示条，再点日期格 / 日头把 `date` 改过去，
+ *     `when` 里的时间原样保留；取消只退出，不动数据。
+ *   - 点周视图小时格 = 以那天那小时新建；点月视图空白格 = 以那天新建（全天）。
+ * 全程不依赖坐标计算，落点由被点中的元素决定，跨端表现一致。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
@@ -16,6 +22,7 @@ import {
   WEEKDAYS,
   addTask,
   isoDay,
+  updateTask,
   useWork,
   work,
   type Task,
@@ -102,13 +109,35 @@ const detailOpen = ref(false)
 const detailId = ref('')
 const quickTitle = ref('')
 const quickTime = ref('09:00')
+/** 加完一条后重建输入框：只清 ref 可能被迟到的 input 事件写回旧文本。 */
+const quickKey = ref(0)
 const nowTick = ref(new Date())
 /** 手机上 7 天放不进一屏：进页面先把选中那天滚进视野，否则用户看到的是空白的周一。 */
 const weekScrollLeft = ref(0)
 
+/* ── 移动模式 / 新建高亮（P0-3） ─────────────────────────────────── */
+
+/** 正在被"移动"的任务 id；空串 = 不在移动模式。 */
+const movingId = ref('')
+/** 刚被新建 / 移动过的任务与日期：给一次性高亮，让用户看见"东西就在这儿"。 */
+const flashTaskId = ref('')
+const flashIso = ref('')
+const FLASH_MS = 1600
+const HOLD_MS = 450
+let flashTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 提示条里的任务名：长标题截断，宁可省略也别把提示条撑成三行（它会压到日头）。 */
+const movingTitle = computed(() => {
+  const title = data.value.tasks.find((t) => t.id === movingId.value)?.title ?? ''
+  return title.length > 12 ? `${title.slice(0, 12)}…` : title
+})
+
 watch(
   () => work.deviceId,
-  () => { detailOpen.value = false },
+  () => {
+    detailOpen.value = false
+    movingId.value = ''
+  },
 )
 
 const tasksByDate = computed<Record<string, Task[]>>(() => {
@@ -367,9 +396,139 @@ function pickMonthDay(iso: string): void {
 }
 
 function openTask(id: string): void {
+  // 长按 / 按住之后，平台多半还会补一次 tap：吃掉它，否则刚进移动模式就被详情盖住。
+  if (swallowUntil > Date.now() && id === movingId.value) {
+    swallowUntil = 0
+    return
+  }
+  movingId.value = ''
   detailId.value = id
   detailOpen.value = true
   haptic('light')
+}
+
+/* ── 移动模式：长按任务条 → 点日期落点 ─────────────────────────────── */
+
+/** 长按后补发的那次 tap 的"吃掉"截止时间（只影响被移动的那条任务）。 */
+let swallowUntil = 0
+/** 桌面浏览器没有长按手势（uni-h5 的 longpress 只挂在触摸事件上），补一个按住等价入口。 */
+let holdTimer: ReturnType<typeof setTimeout> | undefined
+
+function clearHold(): void {
+  if (holdTimer === undefined) return
+  clearTimeout(holdTimer)
+  holdTimer = undefined
+}
+
+function holdStart(id: string): void {
+  clearHold()
+  holdTimer = setTimeout(() => {
+    holdTimer = undefined
+    startMove(id)
+  }, HOLD_MS)
+}
+
+/**
+ * 松手：平台补发的那次 tap 紧跟其后，所以这时把"吃掉"窗口收窄到 400ms——
+ * 刚刚那一下被忽略，之后用户再点这条任务就是正常开详情。
+ */
+function onBarRelease(): void {
+  clearHold()
+  if (swallowUntil > Date.now()) swallowUntil = Date.now() + 400
+}
+
+function startMove(id: string): void {
+  if (movingId.value === id) return
+  movingId.value = id
+  swallowUntil = Date.now() + 4000
+  haptic('medium')
+}
+
+function cancelMove(): void {
+  if (movingId.value === '') return
+  movingId.value = ''
+  haptic('light')
+  toast('已取消移动')
+}
+
+/** 一次性高亮：动画结束由定时器摘掉类名。 */
+function flashFor(id: string, iso: string): void {
+  flashTaskId.value = id
+  flashIso.value = iso
+  if (flashTimer !== undefined) clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => {
+    flashTaskId.value = ''
+    flashIso.value = ''
+  }, FLASH_MS)
+}
+
+/**
+ * 落点：只改 `date`，`when` 原样带走（时间型 when 于是自动跟着任务搬到新的一天）。
+ * 走 updateTask，落盘 / 同步都留给数据层。
+ */
+function moveTo(iso: string): void {
+  const id = movingId.value
+  if (id === '') return
+  movingId.value = ''
+  const task = data.value.tasks.find((t) => t.id === id)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  const when = task.when
+  updateTask(id, { date: iso })
+  flashFor(id, iso)
+  // 周视图里把选中日跟过去，任务同时出现在下方安排列表里，改期结果一眼可见
+  if (calView.value === 'week') anchor.value = iso
+  haptic('light')
+  toast(startOf(when) === null ? `已移到 ${md(iso)}` : `已移到 ${md(iso)} · ${when}`)
+}
+
+/** 周视图日头 / 天列：移动模式下落点，平时选日期。 */
+function tapDate(iso: string): void {
+  if (movingId.value !== '') {
+    moveTo(iso)
+    return
+  }
+  selectDate(iso)
+}
+
+/**
+ * 周视图小时格：平时以这天 + 这小时新建；移动模式下沉成日期落点
+ * （需求约定改期只改日期，时间保持原样）。
+ */
+function slotTap(iso: string, hour: number): void {
+  if (movingId.value !== '') {
+    moveTo(iso)
+    return
+  }
+  const when = `${pad(hour)}:00`
+  const task = addTask('新任务', { date: iso, when })
+  anchor.value = iso
+  flashFor(task.id, iso)
+  haptic('light')
+  toast(`已新建 ${md(iso)} ${when}`)
+}
+
+/** 月视图空白格：以这天新建（全天）；移动模式下是落点。 */
+function tapMonthCell(iso: string): void {
+  if (movingId.value !== '') {
+    moveTo(iso)
+    return
+  }
+  const task = addTask('新任务', { date: iso, when: '全天' })
+  flashFor(task.id, iso)
+  haptic('light')
+  toast(`已新建 ${md(iso)} · 全天`)
+}
+
+/** 月视图日期数字：跳到那一周（保留原来的"找密度 → 再进周"路径）。 */
+function tapMonthDay(iso: string): void {
+  if (movingId.value !== '') {
+    moveTo(iso)
+    return
+  }
+  pickMonthDay(iso)
 }
 
 function evStyle(e: CalEvent): string {
@@ -381,14 +540,17 @@ function onPickTime(e: any): void {
   if (v !== '') quickTime.value = v
 }
 
-function quickAdd(): void {
-  const title = quickTitle.value.trim()
+function quickAdd(e?: any): void {
+  // 同上：确认事件里带的是输入框终值，比 v-model 可靠
+  const raw = e?.detail?.value
+  const title = String(typeof raw === 'string' ? raw : quickTitle.value).trim()
   if (title === '') {
     toast('先写一句要办的事')
     return
   }
   addTask(title, { date: anchor.value, when: quickTime.value })
   quickTitle.value = ''
+  quickKey.value += 1
   haptic('light')
   toast(`已加到 ${md(anchor.value)} ${quickTime.value}`)
 }
@@ -404,6 +566,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (timer !== undefined) clearInterval(timer)
+  if (flashTimer !== undefined) clearTimeout(flashTimer)
+  clearHold()
 })
 
 onShow(() => {
@@ -418,7 +582,19 @@ watch(calView, (v) => {
 
 <template>
   <WorkShell active="calendar" title="日历" :sub="calView === 'week' ? '周视图 · 本地存储' : '月视图 · 本地存储'">
-    <view class="cal">
+    <view class="cal" :class="{ moving: movingId !== '' }">
+      <!-- 移动提示条：0 高 sticky 容器 + 绝对定位，正好压在被临时隐去的工具条位置上，
+           既不挤动网格，也不挡日头 / 日期格这些落点。
+           挤动布局是不行的：长按之后平台还会补发一次 tap，一旦内容位移，
+           那一下就会落到别的日期上（等于"刚长按就被改了期"）。 -->
+      <view v-if="movingId !== ''" class="movewrap">
+        <view class="movebar">
+          <view class="mv-dot" />
+          <text class="mv-txt">正在移动《{{ movingTitle }}》· 点日期格或日头落下 · 点取消退出</text>
+          <view class="mv-cancel" @tap.stop="cancelMove"><text>取消</text></view>
+        </view>
+      </view>
+
       <!-- 周 / 月切换与翻页 -->
       <view class="calbar">
         <view class="navgrp">
@@ -445,7 +621,7 @@ watch(calView, (v) => {
                 :key="d.iso"
                 class="hc"
                 :class="{ today: d.isToday, sel: anchor === d.iso }"
-                @tap="selectDate(d.iso)"
+                @tap="tapDate(d.iso)"
               >
                 <text class="hwd">{{ d.weekday }}</text>
                 <text class="hd mono">{{ d.md }}</text>
@@ -464,17 +640,28 @@ watch(calView, (v) => {
                 :key="d.iso"
                 class="daycol"
                 :class="{ today: d.isToday }"
-                @tap="selectDate(d.iso)"
+                @tap="tapDate(d.iso)"
               >
-                <view v-for="h in HOURS" :key="h" class="slot" />
+                <view
+                  v-for="h in HOURS"
+                  :key="h"
+                  class="slot"
+                  @tap.stop="slotTap(d.iso, h)"
+                />
 
                 <view
                   v-for="ev in d.events"
                   :key="ev.id"
                   class="evbar"
-                  :class="[ev.tone, { done: ev.done }]"
+                  :class="[ev.tone, { done: ev.done, moving: ev.id === movingId, flash: ev.id === flashTaskId }]"
                   :style="evStyle(ev)"
                   @tap.stop="openTask(ev.id)"
+                  @longpress="startMove(ev.id)"
+                  @mousedown="holdStart(ev.id)"
+                  @mouseup="onBarRelease"
+                  @mouseleave="clearHold"
+                  @touchmove="clearHold"
+                  @touchend="onBarRelease"
                 >
                   <text class="et">{{ ev.title }}</text>
                   <text class="eh mono">{{ ev.range }}</text>
@@ -497,16 +684,19 @@ watch(calView, (v) => {
             v-for="c in monthCells"
             :key="c.iso"
             class="mcell"
-            :class="{ out: c.out, today: c.isToday, sel: c.sel }"
-            @tap="pickMonthDay(c.iso)"
+            :class="{ out: c.out, today: c.isToday, sel: c.sel, flash: c.iso === flashIso }"
+            @tap="tapMonthCell(c.iso)"
           >
-            <text class="dn mono">{{ c.d }}</text>
+            <!-- 数字 = 进那一周；格子空白 = 就地新建（移动模式下两处都是落点） -->
+            <view class="mday" @tap.stop="tapMonthDay(c.iso)">
+              <text class="dn mono">{{ c.d }}</text>
+            </view>
             <view class="mdots">
               <view v-for="(tone, i) in c.dots" :key="i" class="mdot" :class="tone" />
             </view>
           </view>
         </view>
-        <text class="mhint">点一天跳到那一周的周视图</text>
+        <text class="mhint">{{ movingId !== '' ? '点任意日期把任务移过去' : '点日期数字跳到那一周 · 点空白处新建' }}</text>
       </view>
 
       <!-- 选中日期的安排 -->
@@ -535,6 +725,7 @@ watch(calView, (v) => {
 
         <view class="addrow">
           <input
+            :key="quickKey"
             v-model="quickTitle"
             class="ain"
             placeholder="加一条到这天…"
@@ -561,6 +752,66 @@ watch(calView, (v) => {
   flex-direction: column;
   padding-top: 2px;
 }
+
+/* ── 移动提示条 ─────────────────────────────────────────────────── */
+
+/* 0 高 sticky：提示条贴着滚动视口顶部，但完全不占页面高度（见模板注释） */
+.movewrap {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 0;
+}
+
+.movebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--bd-strong);
+  background: color-mix(in srgb, var(--acc-soft) 60%, var(--s1));
+  box-shadow: 0 6px 18px var(--acc-soft);
+}
+
+/* 提示条正好顶替工具条：移动期间工具条隐去（visibility 保留占位，不产生位移） */
+.cal.moving .calbar { visibility: hidden; }
+
+.mv-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-soft);
+}
+
+.mv-txt {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--t1);
+}
+
+.mv-cancel {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--bd-strong);
+  background: var(--s1);
+  color: var(--t1);
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+}
+
+.mv-cancel:active { color: var(--acc); }
 
 /* ── 工具条 ─────────────────────────────────────────────────────── */
 
@@ -684,6 +935,15 @@ watch(calView, (v) => {
 .hc.today { background: var(--acc-soft); }
 .hc.sel { box-shadow: inset 0 -2px 0 var(--acc); }
 
+/* 横向滚动后时间轴仍要可见：否则事件块失去了"几点"的标尺 */
+.hc-spacer {
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  background: var(--s1);
+  border-right: 1px solid var(--bd);
+}
+
 .hwd { font-size: 9px; color: var(--t3); }
 .hd { font-size: 11px; font-weight: 600; color: var(--t2); }
 .hc.today .hwd, .hc.today .hd { color: var(--acc); }
@@ -694,7 +954,13 @@ watch(calView, (v) => {
   position: relative;
 }
 
-.hourcol { border-right: 1px solid var(--bd); }
+.hourcol {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--s1);
+  border-right: 1px solid var(--bd);
+}
 
 .hl {
   height: 46px;
@@ -737,6 +1003,22 @@ watch(calView, (v) => {
 .evbar.normal { --ev: var(--acc); }
 .evbar.low { --ev: var(--t3); }
 .evbar.done { opacity: 0.55; }
+
+/* 正在被移动的那条：虚线边 + 抬起，和普通任务条区分开 */
+.evbar.moving {
+  z-index: 4;
+  border-left-style: dashed;
+  opacity: 0.95;
+  box-shadow: 0 0 0 1.5px var(--acc), 0 6px 14px var(--acc-soft);
+}
+
+/* 刚新建 / 刚搬过来的那条：闪两下，告诉用户"就在这儿" */
+.evbar.flash { animation: ev-flash 700ms var(--ease-out) 2; }
+
+@keyframes ev-flash {
+  0%, 100% { box-shadow: 0 0 0 0 var(--acc-soft); }
+  50% { box-shadow: 0 0 0 4px var(--acc-glow); }
+}
 
 .et {
   display: block;
@@ -823,6 +1105,21 @@ watch(calView, (v) => {
 .mcell.today { border-color: var(--bd-strong); background: var(--acc-soft); }
 .mcell.sel { box-shadow: inset 0 0 0 1.5px var(--acc); }
 
+/* 日期数字是"进那一周"的入口；格子其余空白留给新建 */
+.mday {
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  padding: 1px 0 2px;
+}
+
+.mcell.flash { animation: cell-flash 700ms var(--ease-out) 2; }
+
+@keyframes cell-flash {
+  0%, 100% { box-shadow: inset 0 0 0 0 var(--acc-soft); }
+  50% { box-shadow: inset 0 0 0 2px var(--acc); }
+}
+
 .dn { font-size: 10px; color: var(--t2); }
 .mcell.today .dn { color: var(--acc); font-weight: 700; }
 
@@ -849,6 +1146,35 @@ watch(calView, (v) => {
   color: var(--t3);
   margin-top: 8px;
 }
+
+/* ── 移动模式：网格轻量高亮，提示"这里可以落" ───────────────────── */
+
+.cal.moving .weekwrap,
+.cal.moving .monthwrap {
+  border-color: var(--bd-strong);
+  box-shadow: 0 0 0 1px var(--acc-soft), inset 0 0 26px var(--acc-soft);
+}
+
+.cal.moving .hc,
+.cal.moving .daycol {
+  background: color-mix(in srgb, var(--acc-soft) 45%, transparent);
+}
+
+.cal.moving .hc.today,
+.cal.moving .daycol.today {
+  background: color-mix(in srgb, var(--acc-soft) 85%, transparent);
+}
+
+.cal.moving .hc,
+.cal.moving .daycol,
+.cal.moving .mcell {
+  cursor: pointer;
+}
+
+.cal.moving .mcell { border-color: var(--bd-strong); }
+
+.cal.moving .slot:active,
+.cal.moving .mcell:active { background: var(--s3); }
 
 /* ── 安排列表 ───────────────────────────────────────────────────── */
 
