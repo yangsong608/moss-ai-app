@@ -156,8 +156,10 @@ function onPickDate(e: any): void {
   if (v !== '') applyDate(v)
 }
 
-function setToday(): void {
-  applyDate(todayIso)
+function setTomorrow(): void {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  applyDate(isoDay(d))
 }
 
 function clearDate(): void {
@@ -280,7 +282,7 @@ function aiSplit(): void {
                   <text>{{ dateLabel }}</text>
                 </view>
               </picker>
-              <view class="minibtn" @tap="setToday"><text>今天</text></view>
+              <view class="minibtn" @tap="setTomorrow"><text>明天</text></view>
               <view class="minibtn" :class="{ on: t.date === '' }" @tap="clearDate"><text>未排期</text></view>
             </view>
           </view>

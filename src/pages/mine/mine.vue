@@ -18,6 +18,8 @@ const PROTOCOL_LABEL = 'DSH Link · v1'
 const { data } = useWork()
 
 const currentDevice = computed(() => DEVICES.find((d) => d.id === work.deviceId) ?? DEVICES[0])
+/** state 里可能是 auto：按当前实际生效的皮肤高亮，避免两个选项都不亮 */
+const activeSkin = computed<'moss' | '550w'>(() => (state.skinMode === '550w' ? '550w' : 'moss'))
 const stats = computed(() => domainStats(data.value))
 const pending = computed(() => data.value.tasks.filter((t) => t.sync).length)
 const conflicts = computed(() => data.value.tasks.filter((t) => t.conflict).length)
@@ -147,10 +149,10 @@ function placeholder(text: string): void {
             <text class="row-d">MOSS 冷青绿 / 550W 待机红 · 同源令牌</text>
           </view>
           <view class="seg">
-            <view class="seg-i" :class="{ on: state.skinMode === 'moss' }" @tap="pickSkin('moss')">
+            <view class="seg-i" :class="{ on: activeSkin === 'moss' }" @tap="pickSkin('moss')">
               <text>MOSS</text>
             </view>
-            <view class="seg-i" :class="{ on: state.skinMode === '550w' }" @tap="pickSkin('550w')">
+            <view class="seg-i" :class="{ on: activeSkin === '550w' }" @tap="pickSkin('550w')">
               <text>550W</text>
             </view>
           </view>

@@ -31,12 +31,15 @@ const tabs = [
   { key: 'devices', label: '设备' },
   { key: 'sessions', label: '会话' },
   { key: 'me', label: '我的' },
+  { key: 'work', label: '工作台' },
 ] as const
 
-function go(key: 'devices' | 'sessions' | 'me'): void {
+function go(key: 'devices' | 'sessions' | 'me' | 'work'): void {
   if (key === props.active) return
   haptic('light')
-  emit('tab', key)
+  // 「工作台」不在旧壳的路由里：直接 reLaunch 回新壳的今天页
+  if (key === 'work') { uni.reLaunch({ url: '/pages/today/today' }); return }
+  emit('tab', key as 'devices' | 'sessions' | 'me')
 }
 </script>
 

@@ -7,9 +7,9 @@
  *   - uni-app App 端内联 SVG 不稳，图标用文本字形 + CSS 形状
  *   - 切 Tab 用 reLaunch（避免页面栈越叠越深）
  */
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { skinClass, themeClass, state, skin } from '@/core/store'
-import { DEVICES, work, switchDevice, deviceName } from '@/core/workbench'
+import { workDevices, work, switchDevice, deviceName, normalizeDevice } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
 
 const props = defineProps<{
@@ -29,7 +29,7 @@ const TABS = [
   { key: 'mine', label: '我的', glyph: '☰' },
 ] as const
 
-const currentDevice = computed(() => DEVICES.find((d) => d.id === work.deviceId) ?? DEVICES[0])
+const currentDevice = computed(() => workDevices.value.find((d) => d.id === work.deviceId) ?? workDevices.value[0])
 
 function go(key: string): void {
   if (key === props.active) return
@@ -47,6 +47,8 @@ function toggleTheme(): void {
   state.light = !state.light
   haptic('light')
 }
+
+onMounted(() => normalizeDevice())
 
 const syncText = computed(() => `${currentDevice.value.online ? '已同步' : '离线'} · ${deviceName()}`)
 </script>
@@ -74,7 +76,7 @@ const syncText = computed(() => `${currentDevice.value.online ? '已同步' : '�
     <scroll-view scroll-x class="ws-devs" :show-scrollbar="false">
       <view class="ws-devrow">
         <view
-          v-for="d in DEVICES"
+          v-for="d in workDevices"
           :key="d.id"
           class="ws-dev"
           :class="{ on: d.id === work.deviceId, local: d.local }"

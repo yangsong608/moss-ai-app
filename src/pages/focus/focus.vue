@@ -177,7 +177,11 @@ watch(
   { immediate: true },
 )
 
-onUnmounted(stopTick)
+onUnmounted(() => {
+  // 切 Tab 会销毁页面：中断也要落账，否则跑掉的时间在统计里凭空消失
+  settleInterrupt()
+  stopTick()
+})
 </script>
 
 <template>

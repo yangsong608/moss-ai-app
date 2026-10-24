@@ -8,6 +8,7 @@
  */
 
 import { computed, reactive } from 'vue'
+import { state as appState } from './store'
 
 /* ─────────── 类型 ─────────── */
 
@@ -100,6 +101,29 @@ export interface WorkDevice {
   online: boolean
   local?: boolean
 }
+
+/**
+ * 可用的设备域：
+ *   - 真实配对过的设备（core/store.devices）优先，`id` 用宿主 hostId
+ *   - 再加一个「仅本机」伪域（不同步）
+ *   - 没有任何配对设备时退回演示域，保证首屏可用
+ */
+export const workDevices = computed<WorkDevice[]>(() => {
+  const local: WorkDevice = { id: 'dev-local', name: '仅本机', sub: '只存在这台手机', online: true, local: true }
+  const real = appState.devices
+  // 没有真实配对设备时直接用演示域（DEVICES 里已含「仅本机」）
+  if (real.length === 0) return DEVICES
+  return [
+    ...real.map((d) => ({
+      // 数据域跟着宿主走（hostId），不是跟着手机设备走：同一台 PC 换手机仍是同一个域
+      id: d.host?.hostId ?? d.deviceId,
+      name: d.name || d.host?.name || '未命名设备',
+      sub: [d.host?.platform, d.host?.dshVersion].filter((x) => typeof x === 'string' && x.length > 0).join(' · '),
+      online: d.conn === 'online' || d.online === true,
+    })),
+    local,
+  ]
+})
 
 export const DEVICES: WorkDevice[] = [
   { id: 'dev-a', name: '公司-Mac', sub: 'macOS 15.2 · 10.0.3.27', online: true },
@@ -337,7 +361,14 @@ export function removeNote(id: string): void {
 }
 
 export function deviceName(id = work.deviceId): string {
-  return DEVICES.find((d) => d.id === id)?.name ?? '公司-Mac'
+  return workDevices.value.find((d) => d.id === id)?.name ?? workDevices.value[0]?.name ?? '本机'
+}
+
+/** 设备列表变化后校正当前域（配对/解绑都可能让旧 id 失效） */
+export function normalizeDevice(): void {
+  const list = workDevices.value
+  if (!list.some((d) => d.id === work.deviceId)) work.deviceId = list[0]?.id ?? 'dev-local'
+  ensureDomain()
 }
 
 /* 首屏播种 */

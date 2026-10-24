@@ -777,9 +777,10 @@ onUnmounted(() => {
     min-width: 0;
   }
   .editor {
-    height: calc(100vh - 242px);
-    min-height: 460px;
-    max-height: 720px;
+    /* 减去顶栏 + 设备 chips + 页头 + 底栏：让 AI 完善那一行停在 Tab 上方 */
+    height: calc(100vh - 302px);
+    min-height: 380px;
+    max-height: 760px;
   }
   .ed-back { display: none; }
   .edit-placeholder { display: flex; }
