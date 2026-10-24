@@ -54,6 +54,14 @@ export interface Note {
   tags: string[]
   fav: boolean
   updatedAt: number
+  /**
+   * 同步冲突标记（P1-3）。
+   *
+   * 与 Task.conflict 同义：推送时与宿主撞车，本地版本已保留、远端版本另存为
+   * 「冲突副本」笔记。带这个标记的行在 pull 时被冻结（不被远端覆盖/删除），
+   * 用户手动编辑后自动解除。
+   */
+  conflict?: boolean
 }
 
 export interface FocusSession {
@@ -315,7 +323,8 @@ export function updateTask(id: string, patch: Partial<Task>): void {
   mutate((d) => {
     const t = d.tasks.find((x) => x.id === id)
     if (t === undefined) return
-    Object.assign(t, patch, { updatedAt: Date.now(), sync: true })
+    // 用户动手编辑 = 认了这一版：解除同步冲突标记（否则该行在 pull 里永久冻结）
+    Object.assign(t, patch, { updatedAt: Date.now(), sync: true, conflict: false })
   })
   markDirty(work.deviceId, 'tasks', id, 'upsert')
 }
@@ -363,7 +372,8 @@ export function updateNote(id: string, patch: Partial<Note>): void {
   mutate((d) => {
     const n = d.notes.find((x) => x.id === id)
     if (n === undefined) return
-    Object.assign(n, patch, { updatedAt: Date.now() })
+    // 同 updateTask：手动编辑解除冲突冻结
+    Object.assign(n, patch, { updatedAt: Date.now(), conflict: false })
   })
   markDirty(work.deviceId, 'notes', id, 'upsert')
 }
