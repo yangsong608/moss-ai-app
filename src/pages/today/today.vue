@@ -372,59 +372,69 @@ function completedLabel(t: Task): string {
   return `${year}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm(t.updatedAt)}`
 }
 
-/**
- * 台历页：一张卡片 = 一页日历。
- * 「今天」一页 + 「之后安排」按日期各一页 + 「未排期」一页。
- * 已完成的进日历，不在这里出现。
- */
-interface CalPage {
-  key: string
-  kind: 'today' | 'date' | 'inbox'
-  big: string
-  month: string
-  sub: string
-  items: Task[]
-  hint: string
-}
+/* ── 今天的翻页卡片：只当日、按时间排序 ─────────────────────────────── */
 
 const WEEK_TXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
-function mdOf(iso: string): { month: string; day: string; week: string } {
-  const d = new Date(`${iso}T00:00:00`)
-  return { month: `${d.getMonth() + 1}月`, day: String(d.getDate()).padStart(2, '0'), week: WEEK_TXT[d.getDay()] ?? '' }
+const todayMD = computed(() => {
+  const d = new Date(`${todayIso.value}T00:00:00`)
+  return {
+    month: `${d.getMonth() + 1}月`,
+    day: String(d.getDate()).padStart(2, '0'),
+    week: WEEK_TXT[d.getDay()] ?? '',
+  }
+})
+
+/** 只看今天：日历口径的当日集合，去掉已完成，按开始时间升序（无时间的排最后） */
+const todayCards = computed<Task[]>(() => {
+  const onDay = tasksOnDay(filtered.value, todayIso.value).filter((t) => !t.done)
+  return onDay.slice().sort((a, b) => {
+    const sa = taskSpan(a)?.start ?? Number.MAX_SAFE_INTEGER
+    const sb = taskSpan(b)?.start ?? Number.MAX_SAFE_INTEGER
+    if (sa !== sb) return sa - sb
+    return a.title.localeCompare(b.title)
+  })
+})
+
+const cardMode = ref(true)
+const cardIndex = ref(0)
+const flipping = ref(false)
+const flipDir = ref<1 | -1>(1)
+
+const currentCard = computed<Task | undefined>(() => todayCards.value[Math.min(cardIndex.value, Math.max(todayCards.value.length - 1, 0))])
+
+watch(todayCards, (list) => {
+  if (list.length === 0) cardIndex.value = 0
+  else if (cardIndex.value > list.length - 1) cardIndex.value = list.length - 1
+})
+
+function goCard(delta: number): void {
+  const n = todayCards.value.length
+  if (n <= 1 || flipping.value) return
+  const next = cardIndex.value + delta
+  if (next < 0 || next > n - 1) return
+  flipDir.value = delta > 0 ? 1 : -1
+  const reduced = stateLiteOrReduced()
+  if (reduced) {
+    cardIndex.value = next
+    return
+  }
+  flipping.value = true
+  cardIndex.value = next
+  setTimeout(() => { flipping.value = false }, 260)
+  haptic('light')
 }
 
-const pages = computed<CalPage[]>(() => {
-  const g = groups.value
-  const out: CalPage[] = []
-
-  const todayG = g.find((x) => x.key === 'today')
-  if (todayG !== undefined) {
-    const md = mdOf(todayIso.value)
-    out.push({ key: 'today', kind: 'today', big: md.day, month: md.month, sub: `今天 · ${md.week}`, items: todayG.items, hint: todayG.hint })
-  }
-
-  const sched = g.find((x) => x.key === 'scheduled')
-  if (sched !== undefined) {
-    const byDate = new Map<string, Task[]>()
-    sched.items.forEach((t) => {
-      const bucket = byDate.get(t.date) ?? []
-      bucket.push(t)
-      byDate.set(t.date, bucket)
-    })
-    Array.from(byDate.keys()).sort().forEach((iso) => {
-      const md = mdOf(iso)
-      out.push({ key: `d-${iso}`, kind: 'date', big: md.day, month: md.month, sub: `已排期 · ${md.week}`, items: byDate.get(iso) ?? [], hint: '' })
-    })
-  }
-
-  const inbox = g.find((x) => x.key === 'inbox')
-  if (inbox !== undefined) {
-    out.push({ key: 'inbox', kind: 'inbox', big: '✦', month: '收件箱', sub: '未排期', items: inbox.items, hint: inbox.hint })
-  }
-
-  return out
-})
+let touchY = 0
+function onCardTouStart(e: any): void {
+  touchY = e?.touches?.[0]?.clientY ?? 0
+}
+function onCardTouEnd(e: any): void {
+  const y = e?.changedTouches?.[0]?.clientY ?? touchY
+  const dy = y - touchY
+  if (Math.abs(dy) < 36) return
+  goCard(dy < 0 ? 1 : -1)
+}
 
 function setView(v: TaskView): void {
   if (taskView.value === v) return
@@ -679,81 +689,126 @@ function doClear(): void {
         </view>
       </view>
 
-      <!-- 清单：台历翻页页（今天 / 各排期日 / 未排期 各一页） -->
-      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="calpages">
-        <view
-          v-for="(pg, pi) in pages"
-          :key="pg.key"
-          class="calpage"
-          :class="[pg.kind, pi < 8 ? 'enter' : '']"
-          :style="pi < 8 ? { animationDelay: `${pi * 55}ms` } : undefined"
-        >
-          <!-- 装订条 + 打孔 -->
+      <!-- 清单：只当日 + 按时间排序 + 台历翻页卡片 -->
+      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="calwrap">
+        <view class="calbar">
+          <view class="caltoggle">
+            <view class="ct-btn" :class="{ on: cardMode }" @tap="cardMode = true"><text>翻页</text></view>
+            <view class="ct-btn" :class="{ on: !cardMode }" @tap="cardMode = false"><text>列表</text></view>
+          </view>
+          <text class="calbar-n mono">{{ todayCards.length }} 项 · 按时间</text>
+        </view>
+
+        <!-- 翻页卡片：一页一条，按时间升序 -->
+        <view v-if="cardMode" class="calpage today">
           <view class="calbind">
             <view v-for="i in 11" :key="i" class="hole" />
           </view>
 
-          <!-- 页面上的日期块 -->
           <view class="calhead">
             <view class="caldate">
-              <text class="calmonth mono">{{ pg.month }}</text>
-              <text class="calbig mono">{{ pg.big }}</text>
+              <text class="calmonth mono">{{ todayMD.month }}</text>
+              <text class="calbig mono">{{ todayMD.day }}</text>
             </view>
             <view class="calmeta">
-              <text class="calsub">{{ pg.sub }}</text>
-              <text class="calcoun mono">{{ pg.items.length }} 项</text>
+              <text class="calsub">今天 · {{ todayMD.week }}</text>
+              <text class="calcoun mono">{{ todayCards.length }} 项待办</text>
             </view>
-            <view class="calstat">
-              <view class="caldot" :class="pg.kind" />
-            </view>
+            <text v-if="todayCards.length > 0" class="calidx mono">{{ cardIndex + 1 }} / {{ todayCards.length }}</text>
           </view>
 
-          <view class="calrows">
+          <view class="flipzone" @touchstart="onCardTouStart" @touchend="onCardTouEnd">
+            <view v-if="todayCards.length > 2" class="peek p3" />
+            <view v-if="todayCards.length > 1" class="peek p2" />
             <view
-              v-for="(t, index) in pg.items"
-              :key="t.id"
-              class="trow"
-              :class="[{ cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, false)]"
-              @tap="openTask(t.id)"
-              @longpress="openRowMenu(t)"
+              v-if="currentCard !== undefined"
+              :key="currentCard.id"
+              class="flipcard"
+              :class="{ up: flipDir === 1, down: flipDir === -1, flipping }"
+              @tap="openTask(currentCard.id)"
+              @longpress="openRowMenu(currentCard)"
             >
-              <view class="tbar" :style="statusStyle(t)" />
-              <view class="check" :class="{ on: completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
-                <text class="cg"><text class="cg-line" /><text class="cg-line" /></text>
+              <view class="fc-top">
+                <text class="fc-when mono" :class="{ due: isDue(currentCard) }">{{ currentCard.when }}</text>
+                <text class="fc-st" :style="statusChipStyle(currentCard)">{{ statusLabel(currentCard) }}</text>
+                <view class="sp" />
+                <view class="tmenu" @tap.stop="openRowMenu(currentCard)"><text class="tmenu-g">⋯</text></view>
               </view>
-              <view class="tbody">
-                <text class="tt">{{ t.title }}</text>
-                <view class="tmeta">
-                  <text class="tmi st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
-                  <text v-if="isCrossDay(t)" class="tmi span mono">{{ spanLabel(t) }}</text>
-                  <text v-if="t.sub.length > 0" class="tmi mono">{{ subText(t) }}</text>
-                  <text v-for="tag in t.tags" :key="tag" class="tmi">#{{ tag }}</text>
-                  <text v-if="t.pri === 'high'" class="tmi high">高优先</text>
-                  <text v-if="t.dev !== deviceName()" class="tmi dev">{{ t.dev }}</text>
-                  <text v-if="t.conflict" class="tmi warn">冲突</text>
-                </view>
+              <text class="fc-title">{{ currentCard.title }}</text>
+              <view class="fc-meta">
+                <text v-if="isCrossDay(currentCard)" class="tmi span mono">{{ spanLabel(currentCard) }}</text>
+                <text v-if="currentCard.sub.length > 0" class="tmi mono">{{ subText(currentCard) }}</text>
+                <text v-for="tag in currentCard.tags" :key="tag" class="tmi">#{{ tag }}</text>
+                <text v-if="currentCard.pri === 'high'" class="tmi high">高优先</text>
               </view>
-              <view class="tright">
-                <text class="twhen mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
-                <view class="tright-r">
-                  <view v-if="t.sync" class="syncdot" />
-                  <view class="tmenu" @tap.stop="openRowMenu(t)"><text class="tmenu-g">⋯</text></view>
+              <view class="fc-acts">
+                <view class="fc-done" @tap.stop="toggle(currentCard.id)">
+                  <text class="fc-cg" />
+                  <text>完成</text>
                 </view>
+                <text class="fc-hint">上滑/下滑翻页</text>
               </view>
             </view>
 
-            <view v-if="pg.items.length === 0" class="calempty fb-empty">
-              <text class="fb-empty-icon">{{ pg.kind === 'today' ? '☀' : '✓' }}</text>
-              <text>{{ pg.hint || '这一页是空的' }}</text>
+            <view v-else class="flipempty fb-empty">
+              <text class="fb-empty-icon">☀</text>
+              <text>今天还没有安排</text>
+              <text class="fe-d">用上面的输入框记一件，或去日历排期</text>
             </view>
           </view>
 
-          <!-- 页脚：像台历底部的品牌行 -->
+          <view v-if="todayCards.length > 1" class="calnav">
+            <view class="navbtn" :class="{ mut: cardIndex === 0 }" @tap="goCard(-1)"><text>↑</text></view>
+            <view class="dots">
+              <view v-for="(t, i) in todayCards" :key="t.id" class="dot" :class="{ on: i === cardIndex }" />
+            </view>
+            <view class="navbtn" :class="{ mut: cardIndex >= todayCards.length - 1 }" @tap="goCard(1)"><text>↓</text></view>
+          </view>
+
           <view class="calfoot">
-            <text class="calfoot-t mono">{{ pg.kind === 'today' ? 'TODAY' : pg.kind === 'inbox' ? 'INBOX' : 'PLANNED' }}</text>
-            <text class="calfoot-d">{{ pg.items.length }} / {{ pages.length }} 页</text>
+            <text class="calfoot-t mono">TODAY</text>
+            <text class="calfoot-d">只显示今天 · 已完成进日历</text>
           </view>
           <view class="calfold" />
+        </view>
+
+        <!-- 列表模式：同样的当日集合，按时间排 -->
+        <view v-else class="callist">
+          <view
+            v-for="(t, index) in todayCards"
+            :key="t.id"
+            class="trow"
+            :class="[{ cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, false)]"
+            @tap="openTask(t.id)"
+            @longpress="openRowMenu(t)"
+          >
+            <view class="tbar" :style="statusStyle(t)" />
+            <view class="check" :class="{ on: completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
+              <text class="cg"><text class="cg-line" /><text class="cg-line" /></text>
+            </view>
+            <view class="tbody">
+              <text class="tt">{{ t.title }}</text>
+              <view class="tmeta">
+                <text class="tmi st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
+                <text v-if="isCrossDay(t)" class="tmi span mono">{{ spanLabel(t) }}</text>
+                <text v-if="t.sub.length > 0" class="tmi mono">{{ subText(t) }}</text>
+                <text v-for="tag in t.tags" :key="tag" class="tmi">#{{ tag }}</text>
+                <text v-if="t.pri === 'high'" class="tmi high">高优先</text>
+              </view>
+            </view>
+            <view class="tright">
+              <text class="twhen mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
+              <view class="tright-r">
+                <view v-if="t.sync" class="syncdot" />
+                <view class="tmenu" @tap.stop="openRowMenu(t)"><text class="tmenu-g">⋯</text></view>
+              </view>
+            </view>
+          </view>
+
+          <view v-if="todayCards.length === 0" class="calempty fb-empty">
+            <text class="fb-empty-icon">☀</text>
+            <text>今天还没有安排</text>
+          </view>
         </view>
       </view>
 
@@ -1283,6 +1338,72 @@ function doClear(): void {
   box-shadow: -1px -1px 0 color-mix(in srgb, var(--bd-strong) 60%, transparent);
   pointer-events: none;
 }
+
+/* ── 工具条：翻页 / 列表切换 ── */
+.calbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.caltoggle { display: flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--s2); border: 1px solid var(--bd); }
+.ct-btn { padding: 5px 12px; border-radius: 999px; font-size: 10.5px; color: var(--t3); transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out); }
+.ct-btn.on { background: var(--s1); color: var(--t1); box-shadow: 0 1px 3px color-mix(in srgb, var(--t1) 12%, transparent); }
+.calbar-n { margin-left: auto; font-size: 9px; color: var(--t3); }
+
+.calidx { font-size: 10px; color: var(--t2); padding: 3px 8px; border-radius: 999px; background: var(--s3); }
+
+/* ── 翻页卡片 ── */
+.flipzone { position: relative; padding: 2px 14px 12px; min-height: 176px; }
+.peek { position: absolute; left: 20px; right: 20px; height: 100%; border-radius: 14px; border: 1px solid var(--bd); background: var(--s2); }
+.peek.p1 { top: 8px; opacity: 0.55; }
+.peek.p2 { top: 14px; left: 26px; right: 26px; opacity: 0.3; }
+.peek.p3 { top: 19px; left: 32px; right: 32px; opacity: 0.16; }
+
+.flipcard {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 168px;
+  padding: 15px 16px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--bd-strong);
+  background:
+    linear-gradient(180deg, var(--glass-hi, transparent), transparent 42%),
+    var(--s1);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--t1) 10%, transparent), 0 1px 0 var(--bd);
+  transform-origin: top center;
+}
+.flipcard.flipping { animation: flip-in-up 260ms var(--ease-out) both; }
+.flipcard.flipping.down { animation-name: flip-in-down; }
+@keyframes flip-in-up {
+  from { opacity: 0; transform: translateY(16px) rotateX(24deg) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) rotateX(0) scale(1); }
+}
+@keyframes flip-in-down {
+  from { opacity: 0; transform: translateY(-16px) rotateX(-24deg) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) rotateX(0) scale(1); }
+}
+
+.fc-top { display: flex; align-items: center; gap: 8px; }
+.fc-when { font-size: 13px; font-weight: 650; color: var(--t2); letter-spacing: 0.02em; }
+.fc-when.due { color: var(--danger); }
+.fc-st { font-size: 9px; padding: 2px 7px; border-radius: 999px; }
+.fc-title { font-size: 17px; font-weight: 680; line-height: 1.35; letter-spacing: -0.01em; color: var(--t1); }
+.fc-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.fc-acts { margin-top: auto; display: flex; align-items: center; gap: 10px; padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--bd-strong) 50%, transparent); }
+.fc-done { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--acc-soft); color: var(--acc); font-size: 10.5px; font-weight: 600; }
+.fc-cg { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid currentColor; }
+.fc-hint { margin-left: auto; font-size: 9px; color: var(--t3); }
+
+.flipempty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 34px 0; text-align: center; color: var(--t2); font-size: 11.5px; }
+.fe-d { font-size: 10px; color: var(--t3); }
+
+.calnav { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 14px 10px; }
+.navbtn { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--bd); background: var(--s1); color: var(--t2); font-size: 12px; }
+.navbtn.mut { opacity: 0.35; }
+.dots { display: flex; align-items: center; gap: 5px; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: var(--bd-strong); transition: background var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out); }
+.dot.on { background: var(--acc); transform: scale(1.35); }
+
+.callist { display: flex; flex-direction: column; gap: 8px; }
 
 /* 翻页入场 */
 .calpage.enter { animation: page-flip 320ms var(--ease-out) both; }
