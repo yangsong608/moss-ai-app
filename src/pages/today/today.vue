@@ -9,22 +9,24 @@
  * 环形进度点击 = 清已完成（必须二次确认，删除是不可逆的）。
  * 任务行长按（或点右侧 ⋯）= 编辑 / 删除；历史视图里的完成记录可恢复或删除。
  */
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onUnmounted, reactive, ref, watch } from 'vue'
+import { onHide, onShow } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
 import {
+  STATUS_META,
   WEEKDAYS,
   addTask,
   clearDone,
   deviceName,
   domainStats,
-  groupOf,
   historyTasks,
   isoDay,
   removeTask,
   switchDevice,
+  taskSpan,
+  tasksOnDay,
   toggleTask,
-  todayTasks,
   updateTask,
   useWork,
   work,
@@ -37,10 +39,25 @@ import { haptic } from '@/core/haptic'
 
 const { data } = useWork()
 
-const NOW = new Date()
-const TODAY = isoDay()
-const weekday = WEEKDAYS[NOW.getDay()]
-const monthDay = `${NOW.getMonth() + 1}月${NOW.getDate()}日`
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/* ── 实时时钟 ────────────────────────────────────────────────────── */
+
+/**
+ * 页面时钟：每秒用 `new Date()` 重新取系统时间再格式化，不做毫秒累加。
+ * 设备休眠 / 主线程卡顿后回到前台也不会漂移；`todayIso` 由它派生，
+ * 跨午夜时日期、星期与「今天」分组会一起翻篇。
+ */
+const now = ref(new Date())
+
+const clock = computed(() => {
+  const d = now.value
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+})
+
+const todayIso = computed(() => isoDay(now.value))
+const weekday = computed(() => WEEKDAYS[now.value.getDay()])
+const monthDay = computed(() => `${now.value.getMonth() + 1}月${now.value.getDate()}日`)
 
 /** 周一为一周起点（与日历页一致），历史分组的「本周」按它切。 */
 function weekStartOf(iso: string): string {
@@ -51,17 +68,47 @@ function weekStartOf(iso: string): string {
   return isoDay(d)
 }
 
-const WEEK_START = weekStartOf(TODAY)
+const weekStart = computed(() => weekStartOf(todayIso.value))
+
+let clockTimer: ReturnType<typeof setInterval> | undefined
+
+/** 只重新采样系统时间；格式化全部交给 computed（每秒都是真时间） */
+function tickClock(): void {
+  now.value = new Date()
+}
+
+function startClock(): void {
+  stopClock()
+  tickClock()
+  clockTimer = setInterval(tickClock, 1000)
+}
+
+/** onHide / onUnmounted 都要清：后台不空转，避免无谓耗电 */
+function stopClock(): void {
+  if (clockTimer !== undefined) {
+    clearInterval(clockTimer)
+    clockTimer = undefined
+  }
+}
+
+onShow(() => { startClock() })
+onHide(() => { stopClock() })
+onUnmounted(() => { stopClock() })
+
+/* ── 指标与当日聚合 ──────────────────────────────────────────────── */
+
+/** 与日历同一口径：某天覆盖到的任务（含跨天任务落在这天的部分） */
+const todayItems = computed(() => tasksOnDay(data.value.tasks, todayIso.value).filter((t) => !t.done))
 
 /** 环形进度与指标都按当前设备域的全量任务算（与 domainStats 口径一致）。 */
 const stats = computed(() => domainStats(data.value))
-const doneToday = computed(() => data.value.tasks.filter((t) => t.done && t.date === TODAY).length)
-const pendingFocus = computed(() => todayTasks(data.value.tasks).filter((t) => t.status !== 'waiting').length)
-const highPri = computed(() => todayTasks(data.value.tasks).filter((t) => t.pri === 'high').length)
+const doneToday = computed(() => data.value.tasks.filter((t) => t.done && t.date === todayIso.value).length)
+const pendingFocus = computed(() => todayItems.value.filter((t) => t.status !== 'waiting').length)
+const highPri = computed(() => todayItems.value.filter((t) => t.pri === 'high').length)
 const pendingSync = computed(() => data.value.tasks.filter((t) => t.sync && !t.done).length)
 // 设备域列表由 WorkShell / workbench 统一提供（配对后是真实宿主，未配对时退回演示域）
 const onlineDevices = computed(() => workDevices.value.filter((d) => d.online).length)
-const sub = computed(() => `${weekday} · 今日 ${todayTasks(data.value.tasks).length} 项`)
+const sub = computed(() => `${weekday.value} · 今日 ${todayItems.value.length} 项`)
 
 const ringStyle = computed(() => {
   const pct = stats.value.pct
@@ -132,7 +179,7 @@ function addQuick(e?: any): void {
   }
   // 目标设备不是当前域时先切域，任务才会落进那台设备的数据里
   if (quickDev.value !== work.deviceId) switchDevice(quickDev.value)
-  addTask(title, { date: TODAY, when: '今天', dev: deviceName() })
+  addTask(title, { date: todayIso.value, when: '今天', dev: deviceName() })
   quick.value = ''
   quickKey.value += 1
   haptic('light')
@@ -173,17 +220,71 @@ interface GroupView {
 
 const groups = computed<GroupView[]>(() => {
   const list = filtered.value
-  const pick = (g: TaskGroup): Task[] => list.filter((t) => groupOf(t) === g)
+  // 「今天」= 日历口径的当日聚合：跨天任务落在今天的那一段也在这组
+  const todays = tasksOnDay(list, todayIso.value).filter((t) => !t.done)
+  const todaySet = new Set(todays.map((t) => t.id))
+  const rest = list.filter((t) => !t.done && !todaySet.has(t.id))
   return [
-    { key: 'today', label: '今天', icon: '✓', items: pick('today'), hint: '今天还没有安排 · 用上面输入框记一件' },
-    { key: 'scheduled', label: '之后安排', icon: '▦', items: pick('scheduled'), hint: '没有排到其他日期的任务' },
-    { key: 'inbox', label: '未排期', icon: '▤', items: pick('inbox'), hint: '收件箱是空的' },
-    { key: 'done', label: '已完成', icon: '◷', items: pick('done'), hint: '还没有完成的任务' },
+    { key: 'today', label: '今天', icon: '✓', items: todays, hint: '今天还没有安排 · 用上面输入框记一件' },
+    { key: 'scheduled', label: '之后安排', icon: '▦', items: rest.filter((t) => t.date !== ''), hint: '没有排到其他日期的任务' },
+    { key: 'inbox', label: '未排期', icon: '▤', items: rest.filter((t) => t.date === ''), hint: '收件箱是空的' },
+    { key: 'done', label: '已完成', icon: '◷', items: list.filter((t) => t.done), hint: '还没有完成的任务' },
   ]
 })
 
 /** 空分组默认不占屏幕；只有「今天」空着时保留，用来提示去记录。 */
 const visibleGroups = computed(() => groups.value.filter((g) => g.items.length > 0 || g.key === 'today'))
+
+/* ── 状态色 / 跨天区间 ────────────────────────────────────────────── */
+
+/** 任务当前状态：完成优先，其余 next/doing 都算进行中，waiting 是未开始。 */
+function statusKeyOf(t: Task): 'waiting' | 'doing' | 'done' {
+  if (t.done) return 'done'
+  return t.status === 'waiting' ? 'waiting' : 'doing'
+}
+
+function statusVar(t: Task): string {
+  return STATUS_META[statusKeyOf(t)].cssVar
+}
+
+function statusLabel(t: Task): string {
+  return STATUS_META[statusKeyOf(t)].label
+}
+
+/** 状态色条（3px）与状态文案的取色，全部走主题令牌，不用 --acc。 */
+function statusStyle(t: Task): { background: string } {
+  return { background: `var(${statusVar(t)})` }
+}
+
+function statusChipStyle(t: Task): { color: string } {
+  return { color: `var(${statusVar(t)})` }
+}
+
+const DAY_MS = 86_400_000
+
+/** 区间端点：`M/D HH:MM`，两端同格式，一眼看出跨到哪一天 */
+function mdhm(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * 跨天区间的展示文案，如 `10/24 22:00 → 10/25 07:00`。
+ * 全天任务的 end 落在次日 0 点，是日历占位而不是时段：不显示 `00:00 → 00:00`。
+ */
+function spanLabel(t: Task): string {
+  const span = taskSpan(t)
+  if (span === undefined) return ''
+  if (isoDay(new Date(span.start)) === isoDay(new Date(span.end))) return ''
+  // 没有绝对区间的「全天」任务：end 只是次日 0 点的日历占位，不是时段，不显示 00:00 → 00:00
+  const explicit = typeof t.startAt === 'number' && typeof t.endAt === 'number'
+  if (!explicit && span.end - span.start >= DAY_MS) return ''
+  return `${mdhm(span.start)} → ${mdhm(span.end)}`
+}
+
+function isCrossDay(t: Task): boolean {
+  return spanLabel(t) !== ''
+}
 
 interface BoardCol {
   key: TaskStatus
@@ -221,10 +322,10 @@ function hhmm(ts: number): string {
 /** 历史行的完成时间：今天 / 本周带星期 / 更早带月日。 */
 function completedLabel(t: Task): string {
   const day = completedIso(t)
-  if (day === TODAY) return `今天 ${hhmm(t.updatedAt)}`
+  if (day === todayIso.value) return `今天 ${hhmm(t.updatedAt)}`
   const d = new Date(t.updatedAt)
-  if (day >= WEEK_START) return `${WEEKDAYS[d.getDay()]} ${hhmm(t.updatedAt)}`
-  const year = d.getFullYear() === NOW.getFullYear() ? '' : `${d.getFullYear()}年`
+  if (day >= weekStart.value) return `${WEEKDAYS[d.getDay()]} ${hhmm(t.updatedAt)}`
+  const year = d.getFullYear() === now.value.getFullYear() ? '' : `${d.getFullYear()}年`
   return `${year}${d.getMonth() + 1}月${d.getDate()}日 ${hhmm(t.updatedAt)}`
 }
 
@@ -233,8 +334,8 @@ const historyGroups = computed<HistoryGroupView[]>(() => {
   const buckets: Record<HistoryGroupView['key'], Task[]> = { today: [], week: [], earlier: [] }
   historyTasks(data.value.tasks).forEach((t) => {
     const day = completedIso(t)
-    if (day === TODAY) buckets.today.push(t)
-    else if (day >= WEEK_START) buckets.week.push(t)
+    if (day === todayIso.value) buckets.today.push(t)
+    else if (day >= weekStart.value) buckets.week.push(t)
     else buckets.earlier.push(t)
   })
   return [
@@ -397,7 +498,13 @@ function doClear(): void {
       <view class="hero">
         <view class="hero-main">
           <text class="eyebrow">{{ weekday }} · 今天</text>
-          <text class="hdate">{{ monthDay }}</text>
+          <view class="hdateline">
+            <text class="hdate">{{ monthDay }}</text>
+            <view class="clock">
+              <text class="mono hclock">{{ clock }}</text>
+              <text class="clock-l">实时</text>
+            </view>
+          </view>
           <view class="hsub">
             <view class="dot" />
             <text class="hsub-t">已同步 · {{ onlineDevices }} 台设备 · 本机可写</text>
@@ -502,15 +609,15 @@ function doClear(): void {
               @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
+              <view class="tbar" :style="statusStyle(t)" />
               <view class="check" :class="{ on: t.done }" @tap.stop="toggle(t.id)">
                 <text class="cg">✓</text>
               </view>
               <view class="tbody">
                 <text class="tt">{{ t.title }}</text>
-                <view
-                  v-if="t.sub.length > 0 || t.tags.length > 0 || t.dev !== deviceName() || t.conflict || t.pri === 'high'"
-                  class="tmeta"
-                >
+                <view class="tmeta">
+                  <text class="tmi st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
+                  <text v-if="isCrossDay(t)" class="tmi span mono">{{ spanLabel(t) }}</text>
                   <text v-if="t.sub.length > 0" class="tmi mono">{{ subText(t) }}</text>
                   <text v-for="tag in t.tags" :key="tag" class="tmi">#{{ tag }}</text>
                   <text v-if="t.pri === 'high'" class="tmi high">高优先</text>
@@ -544,7 +651,7 @@ function doClear(): void {
               v-for="t in col.items"
               :key="t.id"
               class="bcard"
-              :class="t.pri"
+              :class="[t.pri, statusKeyOf(t)]"
               @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
@@ -705,6 +812,40 @@ function doClear(): void {
   letter-spacing: -0.5px;
   line-height: 1.25;
   color: var(--t1);
+}
+
+/* 日期旁的实时时钟：只在 hero 里占一行，宽度不够时自动换行 */
+.hdateline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.clock {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+}
+
+.hclock {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.03em;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
+
+.clock-l {
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  color: var(--t3);
 }
 
 .hsub {
@@ -1019,6 +1160,7 @@ function doClear(): void {
 }
 
 .trow {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -1027,11 +1169,31 @@ function doClear(): void {
   border: 1px solid var(--bd);
   background: var(--s1);
   transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+  overflow: hidden;
+}
+
+/* 左侧 3px 状态色条：未开始 / 进行中 / 已完成三套色，取主题令牌 */
+.tbar {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--st-doing);
 }
 
 .trow:active { background: var(--s2); }
 .trow.cur { border-color: var(--bd-strong); }
-.trow.done { opacity: 0.62; }
+
+/* 已完成：绿色状态条保留，文字降透明度（不再整行压暗，否则状态色也灰了） */
+.trow.done .tt {
+  color: var(--st-done);
+  opacity: 0.72;
+  text-decoration: line-through;
+}
+
+.trow.done .tmeta { opacity: 0.7; }
 
 .check {
   width: 22px;
@@ -1049,8 +1211,8 @@ function doClear(): void {
 .check:active { transform: scale(0.9); }
 
 .check.on {
-  background: var(--acc);
-  border-color: var(--acc);
+  background: var(--st-done);
+  border-color: var(--st-done);
   color: var(--acc-ink);
 }
 
@@ -1065,11 +1227,6 @@ function doClear(): void {
   line-height: 1.5;
   color: var(--t1);
   word-break: break-word;
-}
-
-.trow.done .tt {
-  color: var(--t3);
-  text-decoration: line-through;
 }
 
 .tmeta {
@@ -1103,6 +1260,19 @@ function doClear(): void {
 }
 
 .tmi.dev { color: var(--t2); }
+
+/* 状态文案：颜色由行内 var(--st-*) 决定，与左侧色条同一套 */
+.tmi.st {
+  font-weight: 600;
+  background: var(--s2);
+}
+
+/* 跨天区间：等宽字体 + 等宽数字，起止两端对齐好读 */
+.tmi.span {
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.1px;
+}
 
 .tright {
   flex: 0 0 auto;
@@ -1326,11 +1496,11 @@ function doClear(): void {
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: var(--acc);
+  background: var(--st-doing);
 }
 
-.bdot.doing { background: var(--warn); }
-.bdot.waiting { background: var(--t3); }
+.bdot.doing { background: var(--st-doing); }
+.bdot.waiting { background: var(--st-waiting); }
 
 .bt {
   font-size: 10px;
@@ -1370,6 +1540,12 @@ function doClear(): void {
 
 .bcard.high::before { background: var(--danger); }
 .bcard.low::before { background: var(--t3); }
+
+/* 卡内左侧和清单行同一套状态色（状态优先于优先级色条） */
+.bcard.waiting::before { background: var(--st-waiting); }
+.bcard.next::before,
+.bcard.doing::before { background: var(--st-doing); }
+.bcard.done::before { background: var(--st-done); }
 
 .bct {
   display: block;

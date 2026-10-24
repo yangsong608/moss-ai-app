@@ -510,21 +510,45 @@ onUnmounted(() => {
         <text>{{ aiHint }}</text>
       </view>
 
+      <!--
+        底部工具条：编辑态 = 一条整宽主操作 + 一条图标次操作；
+        预览态只留「关闭 / 编辑」，不把写作相关的动作带到阅读场合。
+      -->
       <view class="ne-foot safe-bottom">
-        <view class="ai-row">
+        <template v-if="mode === 'preview'">
+          <view class="pv-row">
+            <view class="btn pv-back" @tap="back"><text>关闭</text></view>
+            <view class="btn primary pv-edit" @tap="setMode('edit')">
+              <text class="pv-ic">✎</text>
+              <text>编辑</text>
+            </view>
+          </view>
+        </template>
+
+        <template v-else>
           <view class="btn primary ne-ai" :class="{ busy: aiBusy }" @tap="aiPolish">
+            <text class="ne-ai-ic">✦</text>
             <text>{{ aiBusy ? '完善中…' : 'AI 完善' }}</text>
           </view>
-          <view class="btn ne-ai ne-req" :class="{ busy: aiBusy }" @tap="aiPolishWithRequirement">
-            <text>按要求完善</text>
+          <view class="ne-acts">
+            <view class="ne-act" @tap="aiPolishWithRequirement">
+              <text class="ne-act-ic">✎</text>
+              <text class="ne-act-tx">按要求</text>
+            </view>
+            <view class="ne-act" @tap="askAi">
+              <text class="ne-act-ic">?</text>
+              <text class="ne-act-tx">问 AI</text>
+            </view>
+            <view class="ne-act" @tap="openMove">
+              <text class="ne-act-ic">⇄</text>
+              <text class="ne-act-tx">移动</text>
+            </view>
+            <view class="ne-act danger" @tap="confirmDelete">
+              <text class="ne-act-ic">✕</text>
+              <text class="ne-act-tx">删除</text>
+            </view>
           </view>
-          <view class="btn ne-ai ne-ctx" @tap="askAi"><text>问 AI</text></view>
-        </view>
-        <view class="sub-row">
-          <view class="ne-sub" @tap="openMove"><text>移动到笔记本</text></view>
-          <view class="ne-sub danger" @tap="confirmDelete"><text>删除</text></view>
-          <text class="ne-hint">600ms 自动保存</text>
-        </view>
+        </template>
       </view>
     </template>
 
@@ -704,61 +728,90 @@ onUnmounted(() => {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 10px 14px;
+  gap: 6px;
+  padding: 8px 14px calc(8px + var(--safe-bottom-real, env(safe-area-inset-bottom)));
   border-top: 1px solid var(--bd);
-  background: var(--s2);
+  background: var(--s1);
 }
-.ai-row { display: flex; align-items: center; gap: 8px; }
+
+/* 主操作：整宽强调色实底，44px 是拇指区里最好按的高度 */
 .ne-ai {
-  flex: 1;
-  width: auto;
-  min-width: 0;
-  min-height: 38px;
-  height: 38px;
-  padding: 0 10px;
-  font-size: 12.5px;
-  white-space: nowrap;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  gap: 7px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
 }
+.ne-ai-ic { font-size: 15px; line-height: 1; }
 .ne-ai.busy {
-  opacity: 0.6;
+  opacity: 0.55;
   pointer-events: none;
 }
-.ne-req {
-  font-size: 11.5px;
-  color: var(--t2);
-}
-/* 次按钮：浅色卡片 + 强调色文字，和 WorkShell 的浅色卡片观感一致 */
-.ne-ctx {
-  color: var(--acc);
-  border-color: var(--bd-strong);
-  background: var(--acc-soft);
-}
-.sub-row { display: flex; align-items: center; gap: 8px; }
-.ne-sub {
-  flex: 0 0 auto;
-  height: 32px;
-  padding: 0 12px;
+
+/* 次操作：无边框、图标在上文字在下；只有按下才出底色，不再是一排同款灰按钮 */
+.ne-acts {
   display: flex;
-  align-items: center;
-  border-radius: 9px;
-  border: 1px solid var(--bd);
-  background: var(--s1);
-  color: var(--t2);
-  font-size: 11px;
+  align-items: stretch;
+  gap: 4px;
 }
-.ne-sub.danger {
-  color: var(--danger);
-  border-color: var(--danger-bd);
-  background: var(--danger-soft);
-}
-.ne-hint {
+.ne-act {
   flex: 1;
   min-width: 0;
-  text-align: right;
-  font-size: 9.5px;
-  color: var(--t3);
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--t2);
+  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out);
 }
+.ne-act:active {
+  background: var(--s2);
+  border-color: var(--bd);
+}
+.ne-act-ic { font-size: 15px; line-height: 1; color: var(--t2); }
+.ne-act-tx { font-size: 10px; line-height: 1; letter-spacing: 0.01em; }
+/* 删除只换文字色，不给实底：危险色已经足够，填充会把注意力从主操作上抢走 */
+.ne-act.danger,
+.ne-act.danger .ne-act-ic { color: var(--danger); }
+.ne-act.danger:active {
+  background: var(--danger-soft);
+  border-color: var(--danger-bd);
+}
+
+/* 预览态底栏：只有「关闭 / 编辑」两个动作，编辑为主 */
+.pv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pv-back {
+  flex: 0 0 96px;
+  width: 96px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--t2);
+  background: transparent;
+}
+.pv-back:active { background: var(--s2); }
+.pv-edit {
+  flex: 1;
+  width: auto;
+  height: 44px;
+  min-height: 44px;
+  gap: 7px;
+  font-size: 14px;
+}
+.pv-ic { font-size: 15px; line-height: 1; }
 
 .ne-miss {
   flex: 1;
@@ -781,9 +834,10 @@ onUnmounted(() => {
   font-size: 12.5px;
 }
 
-/* 窄屏（≤ 480）再压一档字号，保证 5 个动作不换行 */
+/* 窄屏（≤ 380）：只压次要动作与分段控件，主按钮保持 44px 不动 */
 @media (max-width: 380px) {
-  .ne-ai { font-size: 11.5px; padding: 0 6px; }
+  .ne-act { height: 42px; }
+  .ne-act-tx { font-size: 9.5px; }
   .seg-i { padding: 0 9px; }
 }
 
@@ -802,6 +856,14 @@ onUnmounted(() => {
     padding-left: 28px;
     padding-right: 28px;
   }
-  .ne-foot { max-width: 100%; }
+  /* 宽屏底栏跟正文同宽：否则 4 个次操作被拉成一整屏的散点 */
+  .ne-ai,
+  .ne-acts,
+  .pv-row {
+    width: 100%;
+    max-width: 780px;
+    margin-left: auto;
+    margin-right: auto;
+  }
 }
 </style>

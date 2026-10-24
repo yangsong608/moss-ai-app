@@ -42,9 +42,30 @@ export interface Task {
   sync: boolean
   /** 冲突副本（M2 用） */
   conflict: boolean
+  /** 绝对起止时间（毫秒）。跨天/跨小时任务用它；缺省时由 date + when 推导 */
+  startAt?: number
+  endAt?: number
   createdAt: number
   updatedAt: number
 }
+
+export interface Reminder {
+  id: string
+  taskId: string
+  /** 触发时间（毫秒） */
+  at: number
+  label: string
+  /** 是否已触发（避免重复提醒） */
+  fired: boolean
+}
+
+/** 任务状态的中文名与语义色令牌（与主题强调色区分，避免"全是绿色"） */
+export const STATUS_META = {
+  waiting: { label: '未开始', cssVar: '--st-waiting' },
+  next: { label: '进行中', cssVar: '--st-doing' },
+  doing: { label: '进行中', cssVar: '--st-doing' },
+  done: { label: '已完成', cssVar: '--st-done' },
+} as const
 
 export interface Note {
   id: string
@@ -95,6 +116,7 @@ export interface DomainData {
   notebooks: Notebook[]
   focus: FocusSession[]
   news: NewsItem[]
+  reminders: Reminder[]
 }
 
 /* ─────────── 工具 ─────────── */
@@ -241,7 +263,7 @@ function seedNotebooks(): Notebook[] {
 }
 
 function seed(device: string): DomainData {
-  return { tasks: seedTasks(), notes: seedNotes(), notebooks: seedNotebooks(), focus: seedFocus(), news: seedNews() }
+  return { tasks: seedTasks(), notes: seedNotes(), notebooks: seedNotebooks(), focus: seedFocus(), news: seedNews(), reminders: [] }
 }
 
 /* ─────────── 响应式状态 ─────────── */
@@ -269,6 +291,7 @@ export function ensureDomain(device = work.deviceId): DomainData {
       id: `nb-${i + 1}`, name, createdAt: Date.now(),
     }))
   }
+  if (!Array.isArray(loaded.reminders)) loaded.reminders = []
   work.domains[device] = loaded
   if (readDomain(device) === undefined) writeDomain(device, loaded)
   return loaded
@@ -284,6 +307,81 @@ export function mutate(fn: (d: DomainData) => void): void {
   const d = ensureDomain()
   fn(d)
   writeDomain(work.deviceId, d)
+}
+
+/* ─────────── 时间区间与当日聚合 ─────────── */
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/** 'HH:MM' / '9:30' → 当天毫秒；解析不出返回 undefined */
+export function timeOfDay(when: string): { h: number; m: number } | undefined {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(when.trim())
+  if (m === null) return undefined
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return undefined
+  return { h, m: mm }
+}
+
+/**
+ * 任务的绝对区间。
+ * 优先用 startAt/endAt；否则用 date + when 推导（默认 1 小时）。
+ */
+export function taskSpan(t: Task): { start: number; end: number } | undefined {
+  if (typeof t.startAt === 'number' && typeof t.endAt === 'number' && t.endAt > t.startAt) {
+    return { start: t.startAt, end: t.endAt }
+  }
+  if (t.date === '') return undefined
+  const hm = timeOfDay(t.when)
+  const base = new Date(`${t.date}T00:00:00`).getTime()
+  if (Number.isNaN(base)) return undefined
+  if (hm === undefined) return { start: base, end: base + 24 * 3600_000 } // 全天
+  const start = base + (hm.h * 60 + hm.m) * 60_000
+  return { start, end: start + 3600_000 }
+}
+
+/** 某一天覆盖到的任务（含跨天任务落在当天的部分） */
+export function tasksOnDay(tasks: readonly Task[], iso: string): Task[] {
+  const dayStart = new Date(`${iso}T00:00:00`).getTime()
+  if (Number.isNaN(dayStart)) return []
+  const dayEnd = dayStart + 24 * 3600_000
+  return tasks.filter((t) => {
+    const span = taskSpan(t)
+    if (span === undefined) return t.date === iso
+    return span.start < dayEnd && span.end > dayStart
+  })
+}
+
+/** 新建/改期的统一入口：写绝对区间同时反推 date/when，保证两种视图一致 */
+export function scheduleTask(id: string, startAt: number, endAt: number): void {
+  const d = new Date(startAt)
+  const iso = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  const when = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  updateTask(id, { startAt, endAt, date: iso, when })
+}
+
+/* ─────────── 提醒（本地闹铃） ─────────── */
+
+export function addReminder(taskId: string, at: number, label: string): Reminder {
+  const r: Reminder = { id: uid(), taskId, at, label, fired: false }
+  mutate((d) => { d.reminders.push(r) })
+  return r
+}
+
+export function removeReminder(id: string): void {
+  mutate((d) => { d.reminders = d.reminders.filter((r) => r.id !== id) })
+}
+
+export function markReminderFired(id: string): void {
+  mutate((d) => {
+    const r = d.reminders.find((x) => x.id === id)
+    if (r !== undefined) r.fired = true
+  })
+}
+
+/** 到点且未触发的提醒（供轮询器使用） */
+export function dueReminders(now = Date.now()): Reminder[] {
+  return ensureDomain().reminders.filter((r) => !r.fired && r.at <= now)
 }
 
 /* ─────────── 派生视图 ─────────── */

@@ -48,6 +48,10 @@ const entityRows = computed(() => {
 
 const conflictNotes = computed(() => data.value.notes.filter((n) => n.title.startsWith('冲突副本')))
 
+function goDevices(): void {
+  uni.reLaunch({ url: '/pages/index/index' })
+}
+
 function openNotes(): void {
   panelOpen.value = false
   uni.reLaunch({ url: '/pages/notes/notes' })
@@ -120,50 +124,6 @@ function placeholder(text: string): void {
 <template>
   <WorkShell active="mine" title="我的" :sub="`${deviceName()} · M1 本地版`">
     <view class="mine-page">
-      <!-- 设备域卡 -->
-      <view class="device-card">
-        <view class="dc-top">
-          <view class="dc-av">
-            <text class="dc-glyph">▣</text>
-            <view class="dc-on" :class="{ off: !currentDevice.online }" />
-          </view>
-          <view class="dc-main">
-            <view class="dc-name-row">
-              <text class="dc-name">{{ currentDevice.name }}</text>
-              <text class="badge" :class="currentDevice.online ? 'on' : 'mut'">
-                {{ currentDevice.online ? '在线' : '离线' }}
-              </text>
-            </view>
-            <text class="dc-sub">{{ currentDevice.sub }}</text>
-          </view>
-          <view class="btn dc-switch" @tap="cycleDevice">切换</view>
-        </view>
-
-        <view class="dc-stats">
-          <view class="dc-stat">
-            <text class="ds-v mono">{{ stats.total }}</text>
-            <text class="ds-l">任务</text>
-          </view>
-          <view class="dc-stat">
-            <text class="ds-v mono">{{ data.notes.length }}</text>
-            <text class="ds-l">笔记</text>
-          </view>
-          <view class="dc-stat">
-            <text class="ds-v mono">{{ data.focus.length }}</text>
-            <text class="ds-l">专注</text>
-          </view>
-          <view class="dc-stat">
-            <text class="ds-v mono">{{ data.news.length }}</text>
-            <text class="ds-l">资讯</text>
-          </view>
-        </view>
-
-        <view class="dc-foot">
-          <text>本地数据 ≈ {{ dataKb }} KB · {{ recordCount }} 条记录</text>
-          <text class="dc-dev mono">{{ work.deviceId }}</text>
-        </view>
-      </view>
-
       <!-- 同步状态（M2 占位，但仍展示真实的待推/冲突数） -->
       <view class="sync-row" @tap="panelOpen = true">
         <view class="sync-icon"><text>⇅</text></view>
@@ -248,25 +208,6 @@ function placeholder(text: string): void {
             <text class="row-d">查看各设备上正在跑 / 等待审批的会话</text>
           </view>
           <text class="chev">›</text>
-        </view>
-      </view>
-
-      <!-- 关于 -->
-      <view class="sect"><text>关于</text><text class="sect-n">M1 本地版</text></view>
-      <view class="group">
-        <view class="row">
-          <view class="row-main">
-            <text class="row-t">版本</text>
-            <text class="row-d">MOSS AI App · 本地优先的多设备个人工作台</text>
-          </view>
-          <text class="row-val">v{{ APP_VERSION }} · M1</text>
-        </view>
-        <view class="row">
-          <view class="row-main">
-            <text class="row-t">协议版本</text>
-            <text class="row-d">配对与会话通道 · 端到端加密 · 幂等重试</text>
-          </view>
-          <text class="row-val">{{ PROTOCOL_LABEL }}</text>
         </view>
       </view>
 

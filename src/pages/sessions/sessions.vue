@@ -18,6 +18,7 @@ import { connectDevice, refreshAll, currentLink } from '@/core/link'
 const rows = computed(() => state.sessions)
 
 /** 有没有会话在跑。空列表时角标不亮——"没东西在跑"本身是有效信息。 */
+const anyOnline = computed(() => state.devices.some((d) => d.conn === 'online' || d.online === true))
 const anyRunning = computed(() => rows.value.some((r) => r.status === 'running'))
 /**
  * 按工作区分组（设计文档 08-v2 §2.1，对应 WorkBuddy 的"任务按文件夹分组"）。
@@ -382,6 +383,12 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
       </view>
     </view>
 
+    <!-- 离线提示：会话必须要连电脑，但工作台其它页照常可用 -->
+    <view v-if="!anyOnline" class="offline-bar">
+      <text class="ob-dot" />
+      <text class="ob-t">离线 · 会话需要连接电脑；任务 / 日历 / 笔记 / 专注 / 资讯 仍可用</text>
+    </view>
+
     <!-- 搜索框：只在点了放大镜后出现，平时不占高度 -->
     <view v-if="searching" class="search-row">
       <input
@@ -685,4 +692,11 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
  * 必须让 footer 自己有下外边距，把它顶到渐变带上方。
  */
 .foot { margin: 24px 4px 64px; text-align: center; font-size: 10.5px; opacity: 0.7; }
+.offline-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 0 8px; padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
+}
+.ob-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: 0 0 6px; }
+.ob-t { font-size: 10.5px; line-height: 1.6; color: var(--t2); }
 </style>

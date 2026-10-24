@@ -53,13 +53,20 @@ function pick(device: string): void {
   switchDevice(device)
 }
 
+/** 回到设备与配对页（换设备/重新配对） */
+function goDevices(): void {
+  haptic('light')
+  uni.reLaunch({ url: '/pages/index/index' })
+}
+
 function toggleTheme(): void {
   state.light = !state.light
   haptic('light')
 }
 
 const syncText = computed(() => {
-  const base = currentDevice.value?.online ? '已同步' : '离线'
+  // 离线不是"不可用"：数据全在本地，只是不同步
+  const base = currentDevice.value?.online ? '已同步' : '离线 · 本地可用'
   const extra = syncStatus.pending > 0 ? ` · 待推 ${syncStatus.pending}` : ''
   const warn = syncStatus.conflicts > 0 ? ` · 冲突 ${syncStatus.conflicts}` : ''
   return `${base}${extra}${warn}`
@@ -94,27 +101,14 @@ const syncText = computed(() => {
             <view class="ws-dot" />
             <text>{{ syncText }}</text>
           </view>
+          <view class="ws-devbtn" @tap="goDevices" title="设备与配对">
+            <text>▣</text>
+          </view>
           <view class="ws-theme" @tap="toggleTheme">
             <text>{{ state.light ? '☾' : '☀' }}</text>
           </view>
         </view>
       </view>
-
-      <!-- 设备域切换 -->
-      <scroll-view scroll-x class="ws-devs" :show-scrollbar="false">
-        <view class="ws-devrow">
-          <view
-            v-for="d in workDevices"
-            :key="d.id"
-            class="ws-dev"
-            :class="{ on: d.id === work.deviceId, local: d.local }"
-            @tap="pick(d.id)"
-          >
-            <view class="ws-devdot" :class="{ off: !d.online }" />
-            <text class="ws-devname">{{ d.name }}</text>
-          </view>
-        </view>
-      </scroll-view>
 
       <!-- 内容 -->
       <scroll-view scroll-y class="ws-body">
@@ -185,23 +179,15 @@ const syncText = computed(() => {
 .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .ws-sync.off .ws-dot { background: var(--t3); }
 .ws-sync.alert .ws-dot { background: var(--warn); }
+.ws-devbtn {
+  width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--s1); border: 1px solid var(--bd); font-size: 14px; color: var(--t2);
+}
 .ws-theme {
   width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center;
   background: var(--s1); border: 1px solid var(--bd); font-size: 15px; color: var(--t2);
 }
 
-.ws-devs { flex: 0 0 auto; white-space: nowrap; padding: 2px 0 6px; }
-.ws-devrow { display: flex; gap: 8px; padding: 0 18px; }
-.ws-dev {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 12px; border-radius: 999px;
-  background: var(--s1); border: 1px solid var(--bd); color: var(--t2); font-size: 11.5px;
-}
-.ws-dev.on { background: var(--acc-soft); border-color: var(--bd-strong); color: var(--acc); }
-.ws-dev.local { border-style: dashed; }
-.ws-devdot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
-.ws-devdot.off { background: var(--t3); }
-.ws-devname { font-weight: 500; }
 
 .ws-body { flex: 1; min-height: 0; }
 .ws-inner { padding: 6px 16px 24px; }
@@ -238,8 +224,6 @@ const syncText = computed(() => {
 
   .ws-main { order: 1; }
   .ws-top { padding: 16px 24px 8px; }
-  .ws-devs { padding: 2px 0 8px; }
-  .ws-devrow { padding: 0 24px; }
   .ws-inner { max-width: 1180px; margin: 0 auto; padding: 8px 24px 28px; }
 }
 </style>

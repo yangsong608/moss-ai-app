@@ -2,38 +2,56 @@
 /**
  * 日历（周 / 月）。
  *
- * 周视图是主视图：7 天 × 8:00–21:00 网格，任务按 `date + when(时:分)` 落成色块；
+ * 周视图是主视图：7 天 × 8:00–21:00 网格，任务按**绝对区间**（startAt/endAt）落成色块；
+ * 没有绝对区间的旧数据由 `taskSpan` 从 `date + when` 推导。跨天任务按天切成片段，
+ * 每天都能看到自己那一段（片段上的「跨天 / 次日」就是跨天区间标记）。
  * 月视图用来"找密度"——点某天直接跳回那一周。下方永远跟着选中日期的安排列表，
- * 加一条也在这里（时间选择器决定它会不会出现在网格里）。
+ * 与「今天」页同源（都走 `tasksOnDay`），加一条也在这里。
  *
  * 数据只读 @/core/workbench 的 DomainData；改期 / 改状态在共用详情抽屉里完成。
  *
  * 手势（P0-4）：
- *   1. 长按任务条 → 弹出操作菜单（移动 / 改期 · 编辑 · 删除 · 取消）。
+ *   1. 长按任务条 → 弹出操作菜单（移动 / 改期 · 编辑 · 设置/取消提醒 · 时长 · 删除）。
  *      菜单用共用 MossSheet（页内自绘），不用 uni.showActionSheet：
  *      原生弹层与应用视觉两张皮，且部分平台最多只显示 6 项。
  *   2. 选「移动 / 改期」进入移动模式：
- *      - 拖动：按住色块随手指走，一个 fixed 幽灵条跟手，落点按列宽 / 行高算，
- *        松手 `updateTask(id, { date, when })`（when 取整点）。
- *      - 兜底：点日期格 / 日头只改 `date`（时间原样），桌面鼠标也能验收。
+ *      - 拖动：按住色块随手指走，一个 fixed 幽灵条跟手，落点按列宽 / 行高算（15 分钟对齐），
+ *        松手走 `scheduleTask(id, 落点, 落点 + 原时长)`——**时长保持不变**。
+ *      - 兜底：点日期格 / 日头只换那一天，原时刻与时长原样带走。
  *   3. 删除：二次确认后 `removeTask`，网格与安排列表即时消失。
+ *   4. 提醒：长按菜单「设置提醒」选提前量（准时 / 5 / 15 / 30 分钟）→ `addReminder`，
+ *      页面每 15 秒轮询 `dueReminders()`：App 端走 plus.push 本地通知，H5 已授权走
+ *      Web Notification，都没有就 showModal + 振动。触发后 `markReminderFired` 防重复。
+ *      首次进入**不**申请通知权限，只有用户第一次设提醒时才请求。
+ *   5. 新建：工具条「＋ 新建」打开页内表单，开始 / 结束各有日期 + 时间（结束可跨天、
+ *      默认 = 开始 + 1 小时），保存先 `addTask` 再 `scheduleTask`。
  *
  * 坐标只用来"猜落点"：列宽从 createSelectorQuery 量（滚动不影响宽度），
  * 高度用与 CSS 严格一致的 HOUR_H 等分；两者都失败时退回点格子，不会写错日期。
  */
 import { computed, getCurrentInstance, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onHide, onShow } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import {
+  STATUS_META,
   WEEKDAYS,
+  addReminder,
   addTask,
+  dueReminders,
   isoDay,
+  markReminderFired,
+  removeReminder,
   removeTask,
+  scheduleTask,
+  taskSpan,
+  tasksOnDay,
+  timeOfDay,
   updateTask,
   useWork,
   work,
+  type Reminder,
   type Task,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
@@ -95,25 +113,94 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-/** "9:30" → 9.5；不是时间型 when（今天 / 未排期 / 截止周五）返回 null。 */
-function startOf(when: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(when.trim())
-  if (m === null) return null
-  const h = Number(m[1])
-  const mi = Number(m[2])
-  if (!Number.isFinite(h) || !Number.isFinite(mi) || h > 23 || mi > 59) return null
-  return h + mi / 60
-}
-
 function fmtH(x: number): string {
   const total = Math.round(x * 60)
   return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`
+}
+
+const DAY_MS = 86_400_000
+
+/** 毫秒 → 当天 "HH:MM"（一律本地时区，与 isoDay 一致） */
+function hm(ms: number): string {
+  const d = new Date(ms)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** `M/D HH:MM`：跨天区间的端点文案（与「今天」页同格式） */
+function mdhm(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm(ms)}`
+}
+
+function isoOf(ms: number): string {
+  return isoDay(new Date(ms))
+}
+
+/** 当天分钟数（0–1439）：网格纵向定位与安排列表排序用 */
+function minutesOf(ms: number): number {
+  const d = new Date(ms)
+  return d.getHours() * 60 + d.getMinutes()
+}
+
+/**
+ * 结束点是**排他**的：`end - 1ms` 落在哪天，任务就真正结束在哪天。
+ * 22:00→次日 00:00 这种"刚好压线"的区间也只算当天，不会误标跨天。
+ */
+function lastIso(ms: number): string {
+  return isoDay(new Date(Math.max(0, ms - 1)))
 }
 
 function toneOf(t: Task): Tone {
   if (t.pri === 'high') return 'high'
   if (t.pri === 'low') return 'low'
   return 'normal'
+}
+
+/**
+ * 「全天 / 未定时」：没有绝对区间、`when` 也不是时刻的任务。
+ * 这类任务不进周网格（否则会画成 13 小时的巨块），只在下方列表里出现——保留旧行为。
+ */
+function allDay(t: Task): boolean {
+  return typeof t.startAt !== 'number' && timeOfDay(t.when) === undefined
+}
+
+/* ── 状态色（--st-waiting / --st-doing / --st-done） ─────────────── */
+
+/** 任务当前状态：完成优先；next/doing 都算进行中；waiting 是未开始。 */
+function statusKeyOf(t: Task): 'waiting' | 'doing' | 'done' {
+  if (t.done) return 'done'
+  return t.status === 'waiting' ? 'waiting' : 'doing'
+}
+
+/** 色值只从 STATUS_META 取，避免页面里散落硬编码颜色 */
+function statusVar(t: Task): string {
+  return STATUS_META[statusKeyOf(t)].cssVar
+}
+
+function statusLabel(t: Task): string {
+  return STATUS_META[statusKeyOf(t)].label
+}
+
+/** 内联样式里的状态色：`var(--st-doing)` 之类 */
+function statusColor(t: Task): string {
+  return `var(${statusVar(t)})`
+}
+
+/** 一条任务在 `iso` 这天的可见片段（小时，落在 8:00–21:00 网格里）；看不见返回 null。 */
+function gridSlice(span: { start: number; end: number }, iso: string): { start: number; end: number } | null {
+  const dayStart = new Date(`${iso}T00:00:00`).getTime()
+  if (Number.isNaN(dayStart)) return null
+  const lo = dayStart + HOUR_FROM * 3600_000
+  const hi = dayStart + HOUR_TO * 3600_000
+  const s = Math.max(span.start, lo)
+  const e = Math.min(span.end, hi)
+  if (e <= s) return null
+  return { start: (s - dayStart) / 3600_000, end: (e - dayStart) / 3600_000 }
+}
+
+/** 15 分钟对齐：拖动落点既不会碎成一堆 :07，也不会把原时刻随手抹掉。 */
+function snap15(minutes: number): number {
+  return Math.round(minutes / 15) * 15
 }
 
 /* ── 数据投影 ───────────────────────────────────────────────────── */
@@ -161,12 +248,133 @@ function shortTitle(id: string, max: number): string {
 
 const menuTitle = computed(() => (menuId.value === '' ? '' : `《${shortTitle(menuId.value, 16)}》`))
 
-/** 菜单项固定四项；「取消」由 MossSheet 底部取消条提供，不占选项位。 */
-const MENU_ITEMS: readonly SheetItem[] = [
-  { label: '移动 / 改期', hint: '进入移动模式：按住色块拖到别的日 / 时，或点日期格落下' },
-  { label: '编辑', hint: '打开任务详情，改标题、备注、状态与优先级' },
-  { label: '删除', hint: '从日历与安排列表移除，同步到其它端（不可恢复）', danger: true },
+/* ── 提醒（本地闹铃）：菜单 → 提前量 → addReminder ─────────────────── */
+
+/** 一条任务只留一个「有效（未触发）」提醒；返回它，没有则 null。 */
+function reminderOf(taskId: string): Reminder | null {
+  const list = data.value.reminders
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const r = list[i]
+    if (r.taskId === taskId && !r.fired) return r
+  }
+  return null
+}
+
+function hasBell(taskId: string): boolean {
+  return reminderOf(taskId) !== null
+}
+
+/** 提前量：准时 / 5 / 15 / 30 分钟（负号 = 相对开始时间往前推） */
+const LEAD_OPTIONS: readonly { lead: number; label: string }[] = [
+  { lead: 0, label: '准时' },
+  { lead: 5, label: '提前 5 分钟' },
+  { lead: 15, label: '提前 15 分钟' },
+  { lead: 30, label: '提前 30 分钟' },
 ]
+
+/** 时长快捷项（分钟） */
+const DURATION_OPTIONS: readonly number[] = [30, 60, 120]
+
+function durationMinutes(t: Task): number | null {
+  const span = taskSpan(t)
+  if (span === undefined) return null
+  return Math.round((span.end - span.start) / 60_000)
+}
+
+/** 时长的人话：47 分钟 / 1.5 小时 */
+function durationText(minutes: number): string {
+  if (minutes >= 60) {
+    const h = Math.round((minutes / 60) * 10) / 10
+    return `${h} 小时`
+  }
+  return `${minutes} 分钟`
+}
+
+/**
+ * 长按菜单：项目随任务状态变化（有无提醒 / 当前时长），所以是 computed。
+ * 下标 → 语义 key 的映射在 onMenuSelect 里一次做完，避免"第 3 项是什么"散落各处。
+ */
+type MenuKey = 'move' | 'edit' | 'remind' | 'duration' | 'delete'
+
+interface MenuOption {
+  key: MenuKey
+  label: string
+  hint: string
+  danger?: boolean
+}
+
+const menuOptions = computed<MenuOption[]>(() => {
+  const id = menuId.value
+  const task = id === '' ? undefined : data.value.tasks.find((t) => t.id === id)
+  const existing = id === '' ? null : reminderOf(id)
+  const dur = task === undefined ? null : durationMinutes(task)
+  return [
+    { key: 'move', label: '移动 / 改期', hint: '进入移动模式：按住色块拖到别的日 / 时，或点日期格落下' },
+    { key: 'edit', label: '编辑', hint: '打开任务详情，改标题、备注、状态与优先级' },
+    {
+      key: 'remind',
+      label: existing === null ? '设置提醒' : '取消提醒',
+      hint: existing === null ? '到点用本地闹铃提醒（可选提前量）' : `${mdhm(existing.at)} 触发 · 点这里取消`,
+    },
+    {
+      key: 'duration',
+      label: '时长',
+      hint: dur === null ? '30 / 60 / 120 分钟' : `当前 ${durationText(dur)} · 改为 30 / 60 / 120 分钟`,
+    },
+    { key: 'delete', label: '删除', hint: '从日历与安排列表移除，同步到其它端（不可恢复）', danger: true },
+  ]
+})
+
+/** MossSheet 只认 {label, hint, danger}；key 留在上面对照。 */
+const MENU_ITEMS = computed<SheetItem[]>(() =>
+  menuOptions.value.map((o) => ({ label: o.label, hint: o.hint, danger: o.danger })),
+)
+
+/* ── 二级菜单（提前量 / 时长）：同一个 MossSheet，换一份 items ────────── */
+
+type SubKind = '' | 'remind' | 'duration'
+
+const subOpen = ref(false)
+const subKind = ref<SubKind>('')
+const subId = ref('')
+
+function subTask(): Task | undefined {
+  if (subId.value === '') return undefined
+  return data.value.tasks.find((t) => t.id === subId.value)
+}
+
+const subTitle = computed(() => {
+  const t = subTask()
+  const name = t === undefined ? '' : shortTitle(t.id, 16)
+  if (subKind.value === 'remind') return `《${name}》提醒时间`
+  if (subKind.value === 'duration') return `《${name}》时长`
+  return ''
+})
+
+const subItems = computed<SheetItem[]>(() => {
+  if (subKind.value === 'remind') {
+    const t = subTask()
+    const span = t === undefined ? undefined : taskSpan(t)
+    return LEAD_OPTIONS.map((o) => {
+      const at = span === undefined ? null : span.start - o.lead * 60_000
+      const hint = at === null
+        ? '这条任务还没有日期 / 时刻'
+        : `${mdhm(at)} 触发${at <= Date.now() ? '（已过去）' : ''}`
+      return { label: o.label, hint }
+    })
+  }
+  if (subKind.value === 'duration') {
+    const t = subTask()
+    const span = t === undefined ? undefined : taskSpan(t)
+    return DURATION_OPTIONS.map((min) => ({
+      label: durationText(min),
+      hint: span === undefined
+        ? '这条任务还没有日期 / 时刻'
+        : `${hm(span.start)}–${hm(span.start + min * 60_000)}`,
+    }))
+  }
+  return []
+})
 
 const deleteMessage = computed(() => {
   const title = shortTitle(deleteId.value, 16)
@@ -186,20 +394,22 @@ watch(
   },
 )
 
-const tasksByDate = computed<Record<string, Task[]>>(() => {
-  const map: Record<string, Task[]> = {}
-  for (const t of data.value.tasks) {
-    if (t.date === '') continue
-    const list = map[t.date] ?? (map[t.date] = [])
-    list.push(t)
-  }
-  return map
-})
+/** 本周 7 天的日期（周一 → 周日）；网格、事件投影、滚动定位都按它算。 */
+const weekStart = computed(() => weekStartOf(anchor.value))
+const weekIsos = computed<string[]>(() =>
+  Array.from({ length: 7 }, (_, i) => addDays(weekStart.value, i)),
+)
 
 interface RawItem {
   t: Task
+  /** 这天网格里的起止（小时，8 = 8:00），已裁到 8:00–21:00 窗口 */
   start: number
   end: number
+  /** 跨天：这天之外还有部分（起 / 止分别标） */
+  crossStart: boolean
+  crossEnd: boolean
+  /** 整条任务的原时长（毫秒，不是裁剪后的）：拖拽改期时按它保持时长 */
+  duration: number
 }
 
 interface CalEvent {
@@ -209,78 +419,104 @@ interface CalEvent {
   height: number
   leftPct: number
   widthPct: number
+  /** 空间 / 优先级色：只画左侧细条，不再当主体底色 */
   tone: Tone
+  /** 状态色 `var(--st-*)`：事件条主体铺色 */
+  st: string
   done: boolean
   range: string
+  /** 跨天：这一条在当天只是其中一段（虚线边 + 「跨天 / 次日」文案） */
+  cross: boolean
+  /** 原时长（毫秒）：拖动时幽灵条与落点都按它算 */
+  duration: number
 }
 
 /**
- * 一周里同一天可能撞时间：用"轨道"算法排成并排。
- * 不做这一步的话，两条 9:30 会完全重叠，用户只能看到一条。
+ * 一天的网格事件：先用 `tasksOnDay` 取"这天覆盖到的任务"（含跨天），
+ * 再用 `taskSpan` 裁出当天 8:00–21:00 的那一段，最后排轨道。
  */
-const eventsByDate = computed<Record<string, CalEvent[]>>(() => {
-  const out: Record<string, CalEvent[]> = {}
+function layoutDay(iso: string): CalEvent[] {
+  const raw: RawItem[] = []
+  for (const t of tasksOnDay(data.value.tasks, iso)) {
+    // 全天 / 未定时不在网格里画（否则会是一条 13 小时的巨块），下方列表里有它
+    if (allDay(t)) continue
+    const span = taskSpan(t)
+    if (span === undefined) continue
+    const slice = gridSlice(span, iso)
+    if (slice === null) continue
+    raw.push({
+      t,
+      start: slice.start,
+      end: slice.end,
+      crossStart: isoOf(span.start) !== iso,
+      crossEnd: lastIso(span.end) !== iso,
+      duration: span.end - span.start,
+    })
+  }
+  raw.sort((a, b) => a.start - b.start || a.end - b.end)
 
-  for (const date of Object.keys(tasksByDate.value)) {
-    const raw: RawItem[] = []
-    for (const t of tasksByDate.value[date] ?? []) {
-      const s = startOf(t.when)
-      if (s === null || s < HOUR_FROM || s >= HOUR_TO) continue
-      raw.push({ t, start: s, end: Math.min(s + 1, HOUR_TO) })
-    }
-    raw.sort((a, b) => a.start - b.start)
+  const list: CalEvent[] = []
+  let cluster: RawItem[] = []
+  let clusterEnd = -1
 
-    const list: CalEvent[] = []
-    let cluster: RawItem[] = []
-    let clusterEnd = -1
-
-    const flush = (): void => {
-      if (cluster.length === 0) return
-      const laneEnds: number[] = []
-      const placed: { item: RawItem; lane: number }[] = []
-      for (const item of cluster) {
-        let lane = laneEnds.findIndex((end) => end <= item.start)
-        if (lane === -1) {
-          lane = laneEnds.length
-          laneEnds.push(item.end)
-        } else {
-          laneEnds[lane] = item.end
-        }
-        placed.push({ item, lane })
+  /**
+   * 一周里同一天可能撞时间：用"轨道"算法排成并排。
+   * 不做这一步的话，两条 9:30 会完全重叠，用户只能看到一条。
+   */
+  const flush = (): void => {
+    if (cluster.length === 0) return
+    const laneEnds: number[] = []
+    const placed: { item: RawItem; lane: number }[] = []
+    for (const item of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= item.start)
+      if (lane === -1) {
+        lane = laneEnds.length
+        laneEnds.push(item.end)
+      } else {
+        laneEnds[lane] = item.end
       }
-      const lanes = Math.max(1, laneEnds.length)
-      const width = 96 / lanes
-      for (const p of placed) {
-        list.push({
-          id: p.item.t.id,
-          title: p.item.t.title,
-          top: Math.round((p.item.start - HOUR_FROM) * HOUR_H),
-          height: Math.max(20, Math.round((p.item.end - p.item.start) * HOUR_H) - 4),
-          leftPct: 2 + p.lane * width,
-          widthPct: width - 2,
-          tone: toneOf(p.item.t),
-          done: p.item.t.done,
-          range: `${fmtH(p.item.start)}–${fmtH(p.item.end)}`,
-        })
-      }
-      cluster = []
-      clusterEnd = -1
+      placed.push({ item, lane })
     }
-
-    for (const item of raw) {
-      if (cluster.length > 0 && item.start >= clusterEnd) flush()
-      cluster.push(item)
-      clusterEnd = Math.max(clusterEnd, item.end)
+    const lanes = Math.max(1, laneEnds.length)
+    const width = 96 / lanes
+    for (const p of placed) {
+      // 跨天的那一端写「跨天 / 次日」，一眼看出这段是被切开的
+      const head = p.item.crossStart ? '跨天' : fmtH(p.item.start)
+      const tail = p.item.crossEnd ? '次日' : fmtH(p.item.end)
+      list.push({
+        id: p.item.t.id,
+        title: p.item.t.title,
+        top: Math.round((p.item.start - HOUR_FROM) * HOUR_H),
+        height: Math.max(20, Math.round((p.item.end - p.item.start) * HOUR_H) - 4),
+        leftPct: 2 + p.lane * width,
+        widthPct: width - 2,
+        tone: toneOf(p.item.t),
+        st: statusColor(p.item.t),
+        done: p.item.t.done,
+        range: `${head}–${tail}`,
+        cross: p.item.crossStart || p.item.crossEnd,
+        duration: p.item.duration,
+      })
     }
-    flush()
-
-    out[date] = list
+    cluster = []
+    clusterEnd = -1
   }
 
+  for (const item of raw) {
+    if (cluster.length > 0 && item.start >= clusterEnd) flush()
+    cluster.push(item)
+    clusterEnd = Math.max(clusterEnd, item.end)
+  }
+  flush()
+
+  return list
+}
+
+const eventsByDate = computed<Record<string, CalEvent[]>>(() => {
+  const out: Record<string, CalEvent[]> = {}
+  for (const iso of weekIsos.value) out[iso] = layoutDay(iso)
   return out
 })
-
-const weekStart = computed(() => weekStartOf(anchor.value))
 
 interface WeekDay {
   iso: string
@@ -290,10 +526,8 @@ interface WeekDay {
   events: CalEvent[]
 }
 
-const weekDays = computed<WeekDay[]>(() => {
-  const start = weekStart.value
-  return Array.from({ length: 7 }, (_, i) => {
-    const iso = addDays(start, i)
+const weekDays = computed<WeekDay[]>(() =>
+  weekIsos.value.map((iso) => {
     const [, m, d] = parts(iso)
     return {
       iso,
@@ -302,8 +536,8 @@ const weekDays = computed<WeekDay[]>(() => {
       isToday: iso === TODAY,
       events: eventsByDate.value[iso] ?? [],
     }
-  })
-})
+  }),
+)
 
 const weekLabel = computed(() => {
   const days = weekDays.value
@@ -323,7 +557,8 @@ interface MonthCell {
   out: boolean
   isToday: boolean
   sel: boolean
-  dots: Tone[]
+  /** 状态色（var(--st-*)）小圆点：颜色直接读状态，不再用优先级 */
+  dots: string[]
 }
 
 const monthCells = computed<MonthCell[]>(() => {
@@ -334,14 +569,15 @@ const monthCells = computed<MonthCell[]>(() => {
   return Array.from({ length: 42 }, (_, i) => {
     const iso = addDays(start, i)
     const [yy, mm, dd] = parts(iso)
-    const tasks = tasksByDate.value[iso] ?? []
+    // 与安排列表同源：跨天任务在它覆盖的每一天都有点
+    const tasks = tasksOnDay(data.value.tasks, iso)
     return {
       iso,
       d: dd,
       out: yy !== y || mm !== m,
       isToday: iso === TODAY,
       sel: iso === anchor.value,
-      dots: tasks.slice(0, 3).map((t) => toneOf(t)),
+      dots: tasks.slice(0, 3).map((t) => statusColor(t)),
     }
   })
 })
@@ -351,28 +587,53 @@ interface AgendaItem {
   title: string
   range: string
   dev: string
-  tone: Tone
+  /** 状态色，左侧 3px 色条 + 状态文案取它 */
+  st: string
+  stLabel: string
   done: boolean
+  /** 跨天：这条在选中日只是其中一段 */
+  cross: boolean
+  bell: boolean
+}
+
+/** 跨天区间的完整文案：`10/24 22:00 → 10/25 07:00`（同「今天」页） */
+function spanRange(span: { start: number; end: number }): string {
+  return `${mdhm(span.start)} → ${mdhm(span.end)}`
 }
 
 const agenda = computed<AgendaItem[]>(() => {
-  // 历史遗留的"已完成但没时间"的任务不该占安排列表：它没有时段，也不会出现在网格里。
-  const list = (tasksByDate.value[anchor.value] ?? []).filter(
-    (t) => !(t.done && startOf(t.when) === null),
-  )
-  const rank = (t: Task): number => startOf(t.when) ?? 99
+  const iso = anchor.value
+  const dayStart = new Date(`${iso}T00:00:00`).getTime()
+  // 与「今天」页同源：覆盖到这一天的任务（含跨天）全部出现
+  const list = tasksOnDay(data.value.tasks, iso).filter((t) => !(t.done && allDay(t)))
+  const rank = (t: Task): number => {
+    const span = taskSpan(t)
+    if (span === undefined) return 24 * 60 + 3 // 未定时排最后
+    if (allDay(t)) return 24 * 60 + 2 // 全天排在定时之后、未定时之前
+    return minutesOf(Math.max(span.start, dayStart))
+  }
   return list
     .slice()
     .sort((a, b) => rank(a) - rank(b))
     .map((t) => {
-      const s = startOf(t.when)
+      const span = taskSpan(t)
+      const cross = span !== undefined && (isoOf(span.start) !== iso || lastIso(span.end) !== iso)
+      let range = '未定时'
+      if (span !== undefined) {
+        if (allDay(t)) range = '全天'
+        else if (cross) range = spanRange(span)
+        else range = `${hm(span.start)}–${hm(span.end)}`
+      }
       return {
         id: t.id,
         title: t.title,
-        tone: toneOf(t),
+        range,
+        st: statusColor(t),
+        stLabel: statusLabel(t),
         done: t.done,
+        cross,
+        bell: hasBell(t.id),
         dev: t.dev,
-        range: s === null ? '未定时' : `${fmtH(s)}–${fmtH(Math.min(s + 1, HOUR_TO))}`,
       }
     })
 })
@@ -519,22 +780,231 @@ function openMenu(id: string): void {
 
 function onMenuSelect(index: number): void {
   const id = menuId.value
+  // 先取选项再清 menuId：menuOptions 依赖 menuId，清早了就查不到这一项
+  const option = menuOptions.value[index]
   menuOpen.value = false
   menuId.value = ''
-  if (id === '') return
+  if (id === '' || option === undefined) return
   if (data.value.tasks.find((t) => t.id === id) === undefined) {
     toast('这条任务已经不在了')
     return
   }
-  if (index === 0) {
+  if (option.key === 'move') {
     startMove(id)
     return
   }
-  if (index === 1) {
+  if (option.key === 'edit') {
     openDetail(id)
     return
   }
-  if (index === 2) askDelete(id)
+  if (option.key === 'remind') {
+    toggleReminder(id)
+    return
+  }
+  if (option.key === 'duration') {
+    openSub('duration', id)
+    return
+  }
+  askDelete(id)
+}
+
+/* ── 二级菜单：设置提前量 / 改时长 ─────────────────────────────────── */
+
+function openSub(kind: SubKind, id: string): void {
+  const task = data.value.tasks.find((t) => t.id === id)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  // 提醒 / 时长都要有真实时刻：全天任务没有"几点"，先别让它进这两条路径
+  if ((kind === 'remind' || kind === 'duration') && (taskSpan(task) === undefined || allDay(task))) {
+    toast(kind === 'remind' ? '先排个具体的日期时间，再来设提醒' : '全天任务没有时刻，先改成带时间的日程')
+    return
+  }
+  subId.value = id
+  subKind.value = kind
+  subOpen.value = true
+  haptic('light')
+}
+
+function onSubSelect(index: number): void {
+  const id = subId.value
+  const kind = subKind.value
+  subOpen.value = false
+  subKind.value = ''
+  subId.value = ''
+  if (id === '') return
+  if (kind === 'remind') {
+    const opt = LEAD_OPTIONS[index]
+    if (opt !== undefined) setReminder(id, opt.lead)
+    return
+  }
+  if (kind === 'duration') {
+    const minutes = DURATION_OPTIONS[index]
+    if (minutes !== undefined) setDuration(id, minutes)
+  }
+}
+
+/* ── 提醒：写入 / 取消 / 通知投递 ─────────────────────────────────── */
+
+/** 设置提醒（同一条任务只保留一个有效提醒，重复设置即替换）。 */
+function setReminder(taskId: string, lead: number): void {
+  const task = data.value.tasks.find((t) => t.id === taskId)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  const span = taskSpan(task)
+  if (span === undefined) {
+    toast('先给这条排个日期，再来设提醒')
+    return
+  }
+  const at = span.start - lead * 60_000
+  if (at <= Date.now()) {
+    toast('这个提前量已经早于现在了，换一个')
+    return
+  }
+  const existing = reminderOf(taskId)
+  if (existing !== null) removeReminder(existing.id)
+  addReminder(taskId, at, task.title === '' ? '日程提醒' : task.title)
+  // 只有用户第一次设提醒时才申请通知权限（进入页面时绝不主动弹）
+  void ensureNotifyPermission()
+  haptic('medium')
+  toast(`提醒已设在 ${mdhm(at)}`)
+}
+
+/** 菜单项是「取消提醒」时走这里。 */
+function toggleReminder(id: string): void {
+  const existing = reminderOf(id)
+  if (existing === null) {
+    openSub('remind', id)
+    return
+  }
+  removeReminder(existing.id)
+  haptic('light')
+  toast('已取消提醒')
+}
+
+/**
+ * 改时长：起点不动，只换 endAt（30 / 60 / 120 分钟）。
+ * 走 scheduleTask 而不是直接写 endAt，date/when 才会跟着绝对区间保持一致。
+ */
+function setDuration(taskId: string, minutes: number): void {
+  const task = data.value.tasks.find((t) => t.id === taskId)
+  if (task === undefined) {
+    toast('这条任务已经不在了')
+    return
+  }
+  const span = taskSpan(task)
+  if (span === undefined || allDay(task)) {
+    toast('全天任务没有时刻，先改成带时间的日程')
+    return
+  }
+  scheduleTask(taskId, span.start, span.start + minutes * 60_000)
+  flashFor(taskId, isoOf(span.start))
+  haptic('medium')
+  toast(`时长改为 ${durationText(minutes)}`)
+}
+
+/**
+ * H5 通知权限：只在设提醒时请求一次。
+ * 用户拒绝就降级到 showModal，不反复骚扰。
+ */
+async function ensureNotifyPermission(): Promise<void> {
+  if (typeof window === 'undefined') return
+  const N = (window as Window & { Notification?: typeof Notification }).Notification
+  if (N === undefined) return
+  if (N.permission !== 'default') return
+  try {
+    const res = await N.requestPermission()
+    if (res !== 'granted') toast('未获得通知权限，到点改用弹窗提醒')
+  } catch {
+    /* 不支持 / 被策略拦截：静默降级到弹窗 */
+  }
+}
+
+/** App 端：plus.push 本地通知（H5 里 plus 不存在，所以一律 typeof 探测）。 */
+function nativeNotify(label: string): boolean {
+  if (typeof plus === 'undefined') return false
+  const push = plus.push
+  if (push === undefined || push === null || typeof push.createMessage !== 'function') return false
+  try {
+    push.createMessage(label, '', { title: '日程提醒' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** H5：权限已授予才用 Web Notification；未授权 / 移动端不支持时返回 false 让调用方降级。 */
+function webNotify(label: string): boolean {
+  if (typeof window === 'undefined') return false
+  const N = (window as Window & { Notification?: typeof Notification }).Notification
+  if (N === undefined || N.permission !== 'granted') return false
+  try {
+    new N('日程提醒', { body: label })
+    return true
+  } catch {
+    // 移动端 Chrome 要求 ServiceWorker 才能构造 Notification：构造失败即降级
+    return false
+  }
+}
+
+/** 最后一级降级：振动 + 页内 modal，用户一定看得见。 */
+function modalNotify(label: string): Promise<void> {
+  try {
+    uni.vibrateLong({ fail: () => {} })
+  } catch {
+    /* 部分平台没有振动马达 */
+  }
+  return new Promise((resolve) => {
+    uni.showModal({
+      title: '⏰ 日程提醒',
+      content: label,
+      showCancel: false,
+      confirmText: '知道了',
+      complete: () => resolve(),
+    })
+  })
+}
+
+/** 正在投递：避免 modal 还开着时下一轮轮询再弹一遍。 */
+let pumping = false
+
+/**
+ * 轮询触发：到点 → 先 markReminderFired（保证不重复）→ 按 App / H5 / modal 逐级降级。
+ * 多条同时到期时串行投递，弹窗不会互相顶掉。
+ */
+async function pumpReminders(): Promise<void> {
+  if (pumping) return
+  pumping = true
+  try {
+    const due = dueReminders()
+    for (const r of due) {
+      markReminderFired(r.id)
+      const label = r.label === '' ? '有一条日程到点了' : r.label
+      if (nativeNotify(label)) continue
+      if (webNotify(label)) continue
+      await modalNotify(label)
+    }
+  } finally {
+    pumping = false
+  }
+}
+
+const REMIND_POLL_MS = 15_000
+let remindTimer: ReturnType<typeof setInterval> | undefined
+
+function startReminderPoll(): void {
+  if (remindTimer !== undefined) return
+  remindTimer = setInterval(() => { void pumpReminders() }, REMIND_POLL_MS)
+  void pumpReminders()
+}
+
+function stopReminderPoll(): void {
+  if (remindTimer === undefined) return
+  clearInterval(remindTimer)
+  remindTimer = undefined
 }
 
 /* ── 删除（二次确认 → removeTask） ─────────────────────────────────── */
@@ -574,6 +1044,8 @@ interface DragState {
   id: string
   title: string
   tone: Tone
+  /** 状态色：幽灵条主体铺它（空间色只留左侧细条） */
+  st: string
   /** 幽灵条尺寸（px）与手指抓取偏移（相对幽灵条顶部） */
   width: number
   height: number
@@ -588,7 +1060,11 @@ interface DragState {
   startCol: number
   baseTop: number
   targetIso: string
+  /** 落点（当天分钟数，15 分钟对齐）；targetHour 只是给小时格高亮用 */
+  targetMinute: number
   targetHour: number
+  /** 原时长（毫秒）：松手只换起点，时长原样带走 */
+  duration: number
   moved: boolean
 }
 
@@ -602,16 +1078,21 @@ let measuring = false
 const dragIso = computed(() => (drag.value === null || !drag.value.moved ? '' : drag.value.targetIso))
 const dragHour = computed(() => (drag.value === null || !drag.value.moved ? -1 : drag.value.targetHour))
 
+/** 当天分钟数 → "HH:MM" */
+function minuteLabel(minutes: number): string {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`
+}
+
 const dragLabel = computed(() => {
   const d = drag.value
   if (d === null) return ''
-  return `${md(d.targetIso)} ${pad(d.targetHour)}:00`
+  return `${md(d.targetIso)} ${minuteLabel(d.targetMinute)}`
 })
 
 /** 提示条上的一句话：拖动中报落点，未拖时报"还能怎么落"。 */
 const moveHint = computed(() => {
   const d = drag.value
-  if (d !== null && d.moved) return `松手落到 ${md(d.targetIso)} ${pad(d.targetHour)}:00`
+  if (d !== null && d.moved) return `松手落到 ${md(d.targetIso)} ${minuteLabel(d.targetMinute)} · 时长不变`
   return calView.value === 'week'
     ? '按住色块拖动 · 或点日期格 / 日头落下'
     : '点任意日期把任务移过去'
@@ -620,7 +1101,7 @@ const moveHint = computed(() => {
 const ghostStyle = computed(() => {
   const d = drag.value
   if (d === null) return ''
-  return `left:${Math.round(d.x)}px;top:${Math.round(d.y)}px;width:${d.width}px;height:${d.height}px`
+  return `left:${Math.round(d.x)}px;top:${Math.round(d.y)}px;width:${d.width}px;height:${d.height}px;--st:${d.st}`
 })
 
 /**
@@ -674,10 +1155,17 @@ function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number):
   const height = Math.max(26, ev.height)
   // 抓取点固定在手指下方一点点：幽灵条不会整块跳到指尖，也不会遮住落点
   const grab = Math.min(height - 6, Math.max(10, Math.round(height / 2)))
+  // 起点分钟数 = 色块 top（含 :30 这类偏移）换算回当天分钟，再对齐 15 分钟
+  const startMinute = clampInt(
+    snap15(Math.round((HOUR_FROM * 60) + (ev.top / HOUR_H) * 60)),
+    HOUR_FROM * 60,
+    HOUR_TO * 60 - 15,
+  )
   drag.value = {
     id,
     title: ev.title,
     tone: ev.tone,
+    st: ev.st,
     width,
     height,
     grab,
@@ -689,7 +1177,9 @@ function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number):
     startCol,
     baseTop: ev.top,
     targetIso: iso,
-    targetHour: clampInt(HOUR_FROM + Math.floor(ev.top / HOUR_H), HOUR_FROM, HOUR_TO - 1),
+    targetMinute: startMinute,
+    targetHour: Math.floor(startMinute / 60),
+    duration: Math.max(15 * 60_000, ev.duration),
     moved: false,
   }
   haptic('medium')
@@ -707,10 +1197,15 @@ function moveDrag(x: number, y: number): void {
   const step = Math.round(dx / colWidth)
   const col = clampInt(d.startCol + step, 0, weekDays.value.length - 1)
   const iso = weekDays.value[col]?.iso ?? d.startIso
-  // 小时：起点色块 top + 竖向位移，落在第几个 46px 格子里就是几点
-  const hour = clampInt(HOUR_FROM + Math.floor((d.baseTop + dy) / HOUR_H), HOUR_FROM, HOUR_TO - 1)
+  // 分钟：起点色块 top + 竖向位移，换回当天分钟数并对齐 15 分钟（比整点更贴手）
+  const minute = clampInt(
+    snap15(Math.round(HOUR_FROM * 60 + ((d.baseTop + dy) / HOUR_H) * 60)),
+    HOUR_FROM * 60,
+    HOUR_TO * 60 - 15,
+  )
   d.targetIso = iso
-  d.targetHour = hour
+  d.targetMinute = minute
+  d.targetHour = Math.floor(minute / 60)
 }
 
 /** 松手：commit=false 用于取消（切视图 / 删任务 / touchcancel）。 */
@@ -725,20 +1220,28 @@ function endDrag(commit: boolean): void {
     toast('这条任务已经不在了')
     return
   }
-  const when = `${pad(d.targetHour)}:00`
   const iso = d.targetIso
+  const [y, m, day] = parts(iso)
+  const start = new Date(y, m - 1, day, Math.floor(d.targetMinute / 60), d.targetMinute % 60, 0, 0).getTime()
   movingId.value = ''
   swallowTap(d.id, 600)
-  if (task.date === iso && task.when === when) {
+  if (!Number.isFinite(start)) {
+    toast('落点算不出来，换一格试试')
+    return
+  }
+  const span = taskSpan(task)
+  // 时长不变：新起点 + 原时长（跨天区间也一起搬走）
+  const duration = Math.max(15 * 60_000, d.duration)
+  if (span !== undefined && span.start === start && span.end - span.start === duration) {
     toast('位置没变')
     return
   }
-  updateTask(d.id, { date: iso, when })
+  scheduleTask(d.id, start, start + duration)
   flashFor(d.id, iso)
   // 周视图把选中日跟过去：任务同时出现在下方安排列表里，改期结果一眼可见
   anchor.value = iso
   haptic('light')
-  toast(`已移到 ${md(iso)} · ${when}`)
+  toast(`已移到 ${md(iso)} · ${minuteLabel(d.targetMinute)}（时长不变）`)
 }
 
 function cancelDrag(): void {
@@ -890,13 +1393,31 @@ function moveTo(iso: string): void {
     toast('这条任务已经不在了')
     return
   }
-  const when = task.when
-  updateTask(id, { date: iso })
+  const span = taskSpan(task)
+  if (span === undefined || allDay(task)) {
+    // 未定时 / 全天：只认日期，别凭空给它编一个时刻
+    updateTask(id, { date: iso })
+    flashFor(id, iso)
+    if (calView.value === 'week') anchor.value = iso
+    haptic('light')
+    toast(span === undefined ? `已移到 ${md(iso)}` : `已移到 ${md(iso)} · 全天`)
+    return
+  }
+  // 带时刻的任务：保留原时刻与原时长，只把绝对区间整体平移到新的一天
+  const [y, m, d] = parts(iso)
+  const minute = minutesOf(span.start)
+  const duration = span.end - span.start
+  const start = new Date(y, m - 1, d, Math.floor(minute / 60), minute % 60, 0, 0).getTime()
+  if (!Number.isFinite(start)) {
+    toast('落点算不出来，换一天试试')
+    return
+  }
+  scheduleTask(id, start, start + duration)
   flashFor(id, iso)
   // 周视图里把选中日跟过去，任务同时出现在下方安排列表里，改期结果一眼可见
   if (calView.value === 'week') anchor.value = iso
   haptic('light')
-  toast(startOf(when) === null ? `已移到 ${md(iso)}` : `已移到 ${md(iso)} · ${when}`)
+  toast(`已移到 ${md(iso)} · ${hm(start)}（时长不变）`)
 }
 
 /** 周视图日头 / 天列：移动模式下落点，平时选日期。 */
@@ -946,8 +1467,12 @@ function tapMonthDay(iso: string): void {
   pickMonthDay(iso)
 }
 
+/**
+ * 事件条样式：几何在 left/top/width/height，颜色只给 `--st`（状态色）。
+ * 空间 / 优先级色仍由 `.high / .normal / .low` 提供，只画左侧 3px 细条。
+ */
 function evStyle(e: CalEvent): string {
-  return `top:${e.top}px;height:${e.height}px;left:${e.leftPct}%;width:${e.widthPct}%`
+  return `top:${e.top}px;height:${e.height}px;left:${e.leftPct}%;width:${e.widthPct}%;--st:${e.st}`
 }
 
 function onPickTime(e: any): void {
@@ -970,13 +1495,148 @@ function quickAdd(e?: any): void {
   toast(`已加到 ${md(anchor.value)} ${quickTime.value}`)
 }
 
-/* ── 时间线（每分钟挪一次 now line） ───────────────────────────────── */
+/* ── 新建（开始 / 结束各带日期 + 时间，结束可跨天） ─────────────────── */
+
+const createOpen = ref(false)
+const createTitle = ref('')
+const createDate = ref(TODAY)
+const createTime = ref('09:00')
+const createEndDate = ref(TODAY)
+const createEndTime = ref('10:00')
+/** 每次打开重建输入框：只清 ref 可能被迟到的 input 事件写回旧文本。 */
+const createKey = ref(0)
+
+/** picker 的 change 事件里带的是终值，比 v-model 可靠。 */
+function pickValue(e: any): string {
+  const v = e?.detail?.value
+  return typeof v === 'string' ? v : ''
+}
+
+function createStartMs(): number {
+  const [y, m, d] = parts(createDate.value)
+  const t = timeOfDay(createTime.value)
+  if (t === undefined) return Number.NaN
+  return new Date(y, m - 1, d, t.h, t.m, 0, 0).getTime()
+}
+
+function createEndMs(): number {
+  const [y, m, d] = parts(createEndDate.value)
+  const t = timeOfDay(createEndTime.value)
+  if (t === undefined) return Number.NaN
+  return new Date(y, m - 1, d, t.h, t.m, 0, 0).getTime()
+}
+
+/** 结束时间从开始时间推：默认 +1 小时（跨天自然进位到次日）。 */
+function setEndFromStart(startMs: number): void {
+  if (!Number.isFinite(startMs)) return
+  const end = startMs + 3600_000
+  createEndDate.value = isoOf(end)
+  createEndTime.value = hm(end)
+}
+
+/** 开始晚于结束时，结束自动跟到开始 + 1 小时，省得用户来回改两个字段。 */
+function keepCreateOrder(): void {
+  const s = createStartMs()
+  const e = createEndMs()
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return
+  if (e <= s) setEndFromStart(s)
+}
+
+function openCreate(): void {
+  const iso = anchor.value
+  // 默认落在"下一个整点"（今天）或 9:00（别的日期），避免一开就是过去时间
+  let startTime = '09:00'
+  if (iso === TODAY) {
+    const now = new Date()
+    const nextHour = Math.min(HOUR_TO - 1, Math.max(HOUR_FROM, now.getHours() + 1))
+    startTime = `${pad(nextHour)}:00`
+  }
+  const [y, m, d] = parts(iso)
+  const start = new Date(y, m - 1, d, Number(startTime.slice(0, 2)), 0, 0, 0).getTime()
+  createTitle.value = ''
+  createDate.value = iso
+  createTime.value = startTime
+  setEndFromStart(start)
+  createKey.value += 1
+  createOpen.value = true
+  haptic('light')
+}
+
+function onCreateStartDate(e: any): void {
+  const v = pickValue(e)
+  if (v !== '') createDate.value = v
+  keepCreateOrder()
+}
+
+function onCreateStartTime(e: any): void {
+  const v = pickValue(e)
+  if (v !== '') createTime.value = v
+  keepCreateOrder()
+}
+
+function onCreateEndDate(e: any): void {
+  const v = pickValue(e)
+  if (v !== '') createEndDate.value = v
+}
+
+function onCreateEndTime(e: any): void {
+  const v = pickValue(e)
+  if (v !== '') createEndTime.value = v
+}
+
+/** 表单提示：时长 + 是否跨天，保存前就知道结果长什么样。 */
+const createHint = computed(() => {
+  const s = createStartMs()
+  const e = createEndMs()
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return '时间格式不对'
+  if (e <= s) return '结束要晚于开始'
+  const min = Math.round((e - s) / 60_000)
+  const dur = min >= 60
+    ? `${Math.floor(min / 60)} 小时${min % 60 > 0 ? ` ${min % 60} 分钟` : ''}`
+    : `${min} 分钟`
+  return isoOf(s) === lastIso(e) ? dur : `${dur} · 跨天`
+})
+
+/**
+ * 保存：先 addTask 再 scheduleTask。
+ * 两步而不是一步塞 startAt/endAt 进 addTask，是为了让 date/when 由 scheduleTask 统一反推，
+ * 与拖拽、改时长走同一条写入路径。
+ */
+function submitCreate(): void {
+  const title = createTitle.value.trim()
+  if (title === '') {
+    toast('先写一句要办的事')
+    return
+  }
+  const start = createStartMs()
+  const end = createEndMs()
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    toast('时间格式不对')
+    return
+  }
+  if (end <= start) {
+    toast('结束要晚于开始')
+    return
+  }
+  const iso = createDate.value
+  const task = addTask(title, { date: iso, when: createTime.value })
+  scheduleTask(task.id, start, end)
+  createOpen.value = false
+  anchor.value = iso
+  flashFor(task.id, iso)
+  haptic('medium')
+  const min = Math.round((end - start) / 60_000)
+  toast(`已建 ${md(iso)} ${hm(start)}–${hm(end)}（${durationText(min)}）`)
+}
+
+/* ── 时间线（每分钟挪一次 now line） + 提醒轮询 ─────────────────────── */
 
 let timer: ReturnType<typeof setInterval> | undefined
 
 onMounted(() => {
   timer = setInterval(() => { nowTick.value = new Date() }, 60_000)
   nextTick(() => focusSelectedDay())
+  startReminderPoll()
 })
 
 onUnmounted(() => {
@@ -984,10 +1644,18 @@ onUnmounted(() => {
   if (flashTimer !== undefined) clearTimeout(flashTimer)
   clearHold()
   detachMouse()
+  stopReminderPoll()
 })
 
 onShow(() => {
   nowTick.value = new Date()
+  // 从别的页面回来可能已经过了好几次 15 秒：立刻补一次，再恢复轮询
+  startReminderPoll()
+})
+
+onHide(() => {
+  // 页面不可见就没有"提醒"的意义：停掉轮询，回来时 onShow 再补
+  stopReminderPoll()
 })
 
 /** 月 → 周时网格是新建的，滚动位置必须重新给一次。 */
@@ -1020,6 +1688,8 @@ watch(calView, (v) => {
         </view>
         <view class="sp" />
         <view class="today-btn" @tap="goToday"><text>今天</text></view>
+        <!-- 新建：标题 + 开始/结束（日期 + 时间，结束可跨天）都在这一个表单里 -->
+        <view class="new-btn" @tap="openCreate"><text>＋ 新建</text></view>
         <view class="seg">
           <view class="seg-btn" :class="{ on: calView === 'week' }" @tap="setCalView('week')"><text>周</text></view>
           <view class="seg-btn" :class="{ on: calView === 'month' }" @tap="setCalView('month')"><text>月</text></view>
@@ -1066,13 +1736,15 @@ watch(calView, (v) => {
                   @tap.stop="slotTap(d.iso, h)"
                 />
 
-                <!-- 长按 = 操作菜单；移动模式下按住 = 拖动（触摸与鼠标共用一套落点计算） -->
+                <!-- 长按 = 操作菜单；移动模式下按住 = 拖动（触摸与鼠标共用一套落点计算）。
+                     主体色 = 状态色（--st），左侧 3px 细条 = 空间 / 优先级色（--ev）。 -->
                 <view
                   v-for="ev in d.events"
                   :key="ev.id"
                   class="evbar"
                   :class="[ev.tone, {
                     done: ev.done,
+                    cross: ev.cross,
                     moving: ev.id === movingId,
                     flash: ev.id === flashTaskId,
                     dragging: drag !== null && drag.id === ev.id,
@@ -1089,7 +1761,10 @@ watch(calView, (v) => {
                   @mouseleave="clearHold"
                 >
                   <text class="et">{{ ev.title }}</text>
-                  <text class="eh mono">{{ ev.range }}</text>
+                  <view class="efoot">
+                    <text v-if="hasBell(ev.id)" class="bell">🔔</text>
+                    <text class="eh mono">{{ ev.range }}</text>
+                  </view>
                 </view>
 
                 <view v-if="d.isToday && nowY >= 0" class="nowline" :style="'top:' + nowY + 'px'" />
@@ -1117,7 +1792,7 @@ watch(calView, (v) => {
               <text class="dn mono">{{ c.d }}</text>
             </view>
             <view class="mdots">
-              <view v-for="(tone, i) in c.dots" :key="i" class="mdot" :class="tone" />
+              <view v-for="(dot, i) in c.dots" :key="i" class="mdot" :style="'background:' + dot" />
             </view>
           </view>
         </view>
@@ -1140,11 +1815,17 @@ watch(calView, (v) => {
           :class="{ done: a.done }"
           @tap="openTask(a.id)"
         >
-          <view class="bar" :class="a.tone" />
+          <!-- 3px 状态色条：未开始 / 进行中 / 已完成一眼可分 -->
+          <view class="bar" :style="'background:' + a.st" />
           <view class="abody">
-            <text class="at mono">{{ a.range }} · {{ a.dev }}</text>
-            <text class="an">{{ a.title }}</text>
+            <text class="at mono">
+              <text>{{ a.range }}</text>
+              <text v-if="a.cross" class="across"> · 跨天</text>
+              <text> · {{ a.dev }}</text>
+            </text>
+            <text class="an"><text v-if="a.bell" class="bell">🔔 </text>{{ a.title }}</text>
           </view>
+          <text class="achip" :style="'color:' + a.st + ';border-color:' + a.st">{{ a.stLabel }}</text>
           <text class="ago">›</text>
         </view>
 
@@ -1196,6 +1877,61 @@ watch(calView, (v) => {
       @update:visible="deleteOpen = $event"
       @confirm="doDelete"
     />
+
+    <!-- 二级菜单：提前量 / 时长（同一个 MossSheet，换 items） -->
+    <MossSheet
+      :visible="subOpen"
+      kind="menu"
+      :title="subTitle"
+      :items="subItems"
+      @update:visible="subOpen = $event"
+      @select="onSubSelect"
+    />
+
+    <!-- 新建表单：MossSheet 只有 menu/confirm/prompt 三种形态，装不下 4 个 picker，
+         所以这里用页内自绘弹层（同样的遮罩 + 底部升起，视觉与 MossSheet 一致）。 -->
+    <view v-if="createOpen" class="fmask" @tap="createOpen = false">
+      <view class="fsheet" @tap.stop>
+        <view class="fgrab" />
+        <text class="ftitle">新建日程</text>
+
+        <input
+          :key="createKey"
+          v-model="createTitle"
+          class="fin"
+          placeholder="要办的事…"
+          placeholder-class="ph"
+          :maxlength="80"
+        />
+
+        <view class="frow">
+          <text class="flabel">开始</text>
+          <picker class="fpick-wrap" mode="date" :value="createDate" @change="onCreateStartDate">
+            <view class="fpick mono"><text>{{ createDate }}</text></view>
+          </picker>
+          <picker class="fpick-wrap tight" mode="time" :value="createTime" @change="onCreateStartTime">
+            <view class="fpick mono"><text>{{ createTime }}</text></view>
+          </picker>
+        </view>
+
+        <view class="frow">
+          <text class="flabel">结束</text>
+          <picker class="fpick-wrap" mode="date" :value="createEndDate" @change="onCreateEndDate">
+            <view class="fpick mono"><text>{{ createEndDate }}</text></view>
+          </picker>
+          <picker class="fpick-wrap tight" mode="time" :value="createEndTime" @change="onCreateEndTime">
+            <view class="fpick mono"><text>{{ createEndTime }}</text></view>
+          </picker>
+        </view>
+
+        <text class="fhint">{{ createHint }}</text>
+
+        <view class="fact">
+          <view class="fbtn ghost" @tap="createOpen = false"><text>取消</text></view>
+          <view class="fbtn primary" @tap="submitCreate"><text>保存</text></view>
+        </view>
+      </view>
+    </view>
   </WorkShell>
 </template>
 
@@ -1327,6 +2063,23 @@ watch(calView, (v) => {
 
 .today-btn:active { color: var(--acc); border-color: var(--bd-strong); }
 
+/* 新建入口：和「今天」同高，用强调色描边区分"这是写操作" */
+.new-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--acc) 55%, var(--bd));
+  background: var(--acc-soft);
+  color: var(--acc);
+  display: flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.new-btn:active { background: color-mix(in srgb, var(--acc-soft) 70%, var(--s1)); }
+
 .seg {
   display: inline-flex;
   gap: 2px;
@@ -1442,13 +2195,16 @@ watch(calView, (v) => {
   border-bottom: 1px solid color-mix(in srgb, var(--bd) 55%, transparent);
 }
 
+/* 事件条：主体铺**状态色**（--st，由 evStyle 内联给出），
+   空间 / 优先级色（--ev）退成左侧 3px 细条——两者不再互相盖住。 */
 .evbar {
   position: absolute;
   z-index: 2;
   overflow: hidden;
   border-radius: 6px;
-  border-left: 2px solid var(--ev, var(--acc));
-  background: color-mix(in srgb, var(--ev, var(--acc)) 16%, transparent);
+  border-left: 3px solid var(--ev, var(--acc));
+  background: color-mix(in srgb, var(--st, var(--acc)) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st, var(--acc)) 26%, transparent);
   padding: 3px 5px;
 }
 
@@ -1456,6 +2212,14 @@ watch(calView, (v) => {
 .evbar.normal { --ev: var(--acc); }
 .evbar.low { --ev: var(--t3); }
 .evbar.done { opacity: 0.55; }
+
+/* 跨天片段：上下留虚线，提示"这段在当天只是被切开的一截" */
+.evbar.cross {
+  border-top: 1px dashed color-mix(in srgb, var(--st, var(--acc)) 60%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--st, var(--acc)) 60%, transparent);
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
 
 /* 正在被移动的那条：虚线边 + 抬起，和普通任务条区分开 */
 .evbar.moving {
@@ -1490,12 +2254,25 @@ watch(calView, (v) => {
   text-overflow: ellipsis;
 }
 
+/* 事件条底部一行：🔔 提醒标记 + 时段 / 跨天文案 */
+.efoot {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 1px;
+  min-width: 0;
+}
+
+.bell { font-size: 8px; line-height: 1; opacity: 0.9; }
+
 .eh {
   display: block;
-  margin-top: 1px;
+  min-width: 0;
   font-size: 8px;
   color: var(--t2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nowline {
@@ -1588,15 +2365,13 @@ watch(calView, (v) => {
   min-height: 4px;
 }
 
+/* 月视图小圆点：颜色由内联 style 给（状态色），这里只留形状 */
 .mdot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: var(--acc);
 }
-
-.mdot.high { background: var(--danger); }
-.mdot.low { background: var(--t3); }
 
 .mhint {
   display: block;
@@ -1666,7 +2441,7 @@ watch(calView, (v) => {
   padding: 3px 6px;
   border-radius: 6px;
   border-left: 3px solid var(--ev, var(--acc));
-  background: color-mix(in srgb, var(--ev, var(--acc)) 24%, var(--s1));
+  background: color-mix(in srgb, var(--st, var(--ev, var(--acc))) 26%, var(--s1));
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42), 0 0 0 1.5px var(--acc);
   overflow: hidden;
   pointer-events: none;
@@ -1732,17 +2507,14 @@ watch(calView, (v) => {
 .agenda-item.done { opacity: 0.6; }
 .agenda-item + .agenda-item { border-top: 1px solid var(--bd); }
 
+/* 3px 色条：颜色由内联 style 给（状态色），这里只留形状 */
 .bar {
   width: 3px;
   flex: 0 0 3px;
   align-self: stretch;
   border-radius: 3px;
-  background: var(--ev, var(--acc));
+  background: var(--st, var(--acc));
 }
-
-.bar.high { --ev: var(--danger); }
-.bar.normal { --ev: var(--acc); }
-.bar.low { --ev: var(--t3); }
 
 .abody { flex: 1; min-width: 0; }
 
@@ -1750,6 +2522,20 @@ watch(calView, (v) => {
   display: block;
   font-size: 9px;
   color: var(--t3);
+}
+
+.across { color: var(--st-doing); }
+
+/* 状态文案：与色条同色，边框弱化，不抢标题 */
+.achip {
+  align-self: center;
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  font-size: 8.5px;
+  line-height: 1.5;
+  opacity: 0.9;
 }
 
 .an {
@@ -1827,6 +2613,135 @@ watch(calView, (v) => {
 .aadd-g { font-size: 15px; font-weight: 600; line-height: 1; }
 
 .ph { color: var(--t3); }
+
+/* ── 新建表单（页内弹层：遮罩 + 底部升起，与 MossSheet 同一套观感） ── */
+
+.fmask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+}
+
+.fsheet {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg);
+  border-top: 1px solid var(--bd-strong);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  padding: 8px 16px calc(14px + var(--safe-bottom-real, 0px));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+  animation: sheet-up var(--t-mid) var(--ease-out);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(18px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.fgrab {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bd-strong);
+  margin: 2px auto 0;
+}
+
+.ftitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t1);
+}
+
+.fin {
+  height: 40px;
+  padding: 0 11px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--bd);
+  background: var(--s1);
+  color: var(--t1);
+  font-size: 13px;
+}
+
+.frow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flabel {
+  flex: 0 0 26px;
+  font-size: 10px;
+  color: var(--t3);
+}
+
+/* 日期 / 时间选择器：日期铺开、时间定宽。
+   picker 在 H5 是 <uni-picker>，tag 选择器命中不了，所以用 class（挂在组件根上）。 */
+.fpick-wrap { flex: 1; min-width: 0; }
+.fpick-wrap.tight { flex: 0 0 auto; }
+
+.fpick {
+  height: 34px;
+  min-width: 34px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.fpick:active { border-color: var(--bd-strong); }
+
+.fhint {
+  font-size: 9.5px;
+  color: var(--t3);
+  padding-left: 26px;
+}
+
+.fact {
+  display: flex;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.fbtn {
+  flex: 1;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fbtn.ghost {
+  border: 1px solid var(--bd);
+  background: var(--s1);
+  color: var(--t2);
+}
+
+.fbtn.primary {
+  background: var(--acc);
+  color: var(--acc-ink);
+}
+
+.fbtn.primary:active { transform: scale(0.98); }
+
+/* 减少动效偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .fsheet { animation: none; }
+}
 
 /* ── 平板 ───────────────────────────────────────────────────────── */
 

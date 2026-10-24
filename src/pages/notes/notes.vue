@@ -181,6 +181,18 @@ function openEditor(id: string): void {
   uni.navigateTo({ url: `/pages/note-edit/note-edit?id=${id}` })
 }
 
+/**
+ * 卡片「预览」：直接进整页预览态（preview=1），不落在编辑器上。
+ *
+ * 与阅读态的分工：阅读态留在列表页里快速扫读，预览是整页排版 + 更宽的行宽，
+ * 也是「发之前先看一眼」的路径；返回后列表的阅读态还在，不丢当前位置。
+ */
+function openPreview(id: string): void {
+  if (id === '') return
+  haptic('light')
+  uni.navigateTo({ url: `/pages/note-edit/note-edit?id=${id}&preview=1` })
+}
+
 function setFilter(key: string): void {
   if (filter.value === key) return
   haptic('light')
@@ -425,10 +437,17 @@ onMounted(selectFirstForWide)
               </view>
             </view>
             <view class="nc-sum"><text>{{ summary(n) || '空白笔记 · 点开读或写' }}</text></view>
-            <view class="nc-meta">
-              <text class="nb-tag">{{ n.notebook }}</text>
-              <text v-for="tag in n.tags" :key="tag" class="tag">#{{ tag }}</text>
-              <text class="nc-time mono">{{ timeLabel(n.updatedAt) }}</text>
+            <view class="nc-foot">
+              <view class="nc-meta">
+                <text class="nb-tag">{{ n.notebook }}</text>
+                <text v-for="tag in n.tags" :key="tag" class="tag">#{{ tag }}</text>
+                <text class="nc-time mono">{{ timeLabel(n.updatedAt) }}</text>
+              </view>
+              <!-- 右下「预览」：直接进整页预览，不经过编辑器；stop 防止连带进阅读态 -->
+              <view class="nc-pv" @tap.stop="openPreview(n.id)">
+                <text class="nc-pv-ic">▤</text>
+                <text class="nc-pv-tx">预览</text>
+              </view>
             </view>
           </view>
         </view>
@@ -670,13 +689,48 @@ onMounted(selectFirstForWide)
   color: var(--t3);
   word-break: break-word;
 }
+/* 卡片底部一行：左侧笔记本/标签/时间，右下角是独立的「预览」入口 */
+.nc-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 9px;
+}
 .nc-meta {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 9px;
+  margin-top: 0;
 }
+.nc-pv {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t2);
+  font-size: 10px;
+  line-height: 1;
+  transition: color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+.nc-pv:active {
+  color: var(--acc);
+  border-color: var(--bd-strong);
+}
+.nc-pv-ic {
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--t3);
+}
+.nc-pv:active .nc-pv-ic { color: var(--acc); }
+.nc-pv-tx { line-height: 1; }
 .nb-tag {
   flex: 0 0 auto;
   font-size: 9.5px;

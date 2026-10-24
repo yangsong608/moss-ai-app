@@ -37,6 +37,13 @@
   --warn-soft: rgba(232, 194, 74, 0.1);
   --danger: #ff5c4d;
   --danger-soft: rgba(255, 92, 77, 0.12);
+  /* 任务状态色：未开始=蓝灰、进行中=橙、已完成=绿（与主题强调色区分） */
+  --st-waiting: #7f8fa6;
+  --st-waiting-soft: rgba(127, 143, 166, 0.14);
+  --st-doing: #e8913a;
+  --st-doing-soft: rgba(232, 145, 58, 0.14);
+  --st-done: #3fae73;
+  --st-done-soft: rgba(63, 174, 115, 0.14);
   --danger-bd: rgba(255, 92, 77, 0.42);
   --veil-opacity: 0.38;
   --glow-on: 1;
@@ -115,6 +122,12 @@
   --warn: #e8c24a;
   --warn-soft: rgba(232, 194, 74, 0.1);
   --danger: #ff3b2f;
+  --st-waiting: #64748b;
+  --st-waiting-soft: rgba(100, 116, 139, 0.12);
+  --st-doing: #c9761f;
+  --st-doing-soft: rgba(201, 118, 31, 0.12);
+  --st-done: #15803d;
+  --st-done-soft: rgba(21, 128, 61, 0.12);
   --danger-soft: rgba(255, 59, 47, 0.12);
   --danger-bd: rgba(255, 59, 47, 0.42);
 }
@@ -170,6 +183,12 @@
   --warn: #8a6414;
   --warn-soft: rgba(138, 100, 20, 0.1);
   --danger: #b4311f;
+  --st-waiting: #5f6f85;
+  --st-waiting-soft: rgba(95, 111, 133, 0.12);
+  --st-doing: #b45309;
+  --st-doing-soft: rgba(180, 83, 9, 0.12);
+  --st-done: #157347;
+  --st-done-soft: rgba(21, 115, 71, 0.12);
   --danger-soft: rgba(180, 49, 31, 0.1);
   --danger-bd: rgba(180, 49, 31, 0.36);
 }
