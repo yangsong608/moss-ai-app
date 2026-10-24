@@ -23,6 +23,7 @@ import {
   historyTasks,
   isoDay,
   removeTask,
+  scheduleTask,
   switchDevice,
   taskSpan,
   tasksOnDay,
@@ -228,7 +229,10 @@ function addQuick(e?: any): void {
   }
   // 目标设备不是当前域时先切域，任务才会落进那台设备的数据里
   if (quickDev.value !== work.deviceId) switchDevice(quickDev.value)
+  // 新增即排期：开始 = 现在，结束 = 现在 + 1 小时（写入真实区间，日历网格也可见）
+  const start = Date.now()
   const task = addTask(title, { date: todayIso.value, when: '今天', dev: deviceName() })
+  scheduleTask(task.id, start, start + 3600_000)
   markFeedback(enteringIds, task.id)
   quick.value = ''
   quickKey.value += 1

@@ -14,6 +14,8 @@ import {
   deviceName,
   isoDay,
   removeTask,
+  scheduleTask,
+  taskSpan,
   toggleSub,
   toggleTask,
   uid,
@@ -176,6 +178,74 @@ function applyDate(next: string): void {
 function onPickDate(e: any): void {
   const v = String(e?.detail?.value ?? '')
   if (v !== '') applyDate(v)
+}
+
+/* ── 时间段（开始 / 结束日期与时间） ───────────────────────────────── */
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+const span = computed(() => {
+  const s = taskSpan(t.value)
+  return s ?? null
+})
+
+function fmtDate(ts: number): string {
+  return isoDay(new Date(ts))
+}
+function fmtTime(ts: number): string {
+  const d = new Date(ts)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+const spanLabelText = computed(() => {
+  const s = span.value
+  if (s === null) return '未设置时间段'
+  const a = new Date(s.start)
+  const b = new Date(s.end)
+  const sameDay = isoDay(a) === isoDay(b)
+  const minutes = Math.max(1, Math.round((s.end - s.start) / 60000))
+  const dur = minutes >= 60 ? `${Math.floor(minutes / 60)} 小时${minutes % 60 > 0 ? ` ${minutes % 60} 分` : ''}` : `${minutes} 分钟`
+  const left = `${a.getMonth() + 1}/${a.getDate()} ${fmtTime(s.start)}`
+  const right = sameDay ? fmtTime(s.end) : `${b.getMonth() + 1}/${b.getDate()} ${fmtTime(s.end)}`
+  return `${left} → ${right} · ${dur}`
+})
+
+/** 改开始/结束的日期或时间：四段里改一段，其余沿用当前值 */
+function commitSpan(part: 'startDate' | 'startTime' | 'endDate' | 'endTime', value: string): void {
+  if (!alive.value || value === '') return
+  const cur = span.value ?? { start: Date.now(), end: Date.now() + 3600_000 }
+  let sd = fmtDate(cur.start)
+  let st = fmtTime(cur.start)
+  let ed = fmtDate(cur.end)
+  let et = fmtTime(cur.end)
+  if (part === 'startDate') { sd = value; if (ed < sd) ed = sd }
+  else if (part === 'startTime') st = value
+  else if (part === 'endDate') { ed = value; if (ed < sd) ed = sd }
+  else et = value
+  const start = new Date(`${sd}T${st}:00`).getTime()
+  let end = new Date(`${ed}T${et}:00`).getTime()
+  if (Number.isNaN(start) || Number.isNaN(end)) return
+  if (end <= start) end = start + 3600_000
+  scheduleTask(t.value.id, start, end)
+  haptic('light')
+  toast('时间段已更新')
+}
+
+function onSpanDate(part: 'startDate' | 'endDate', e: any): void {
+  commitSpan(part, String(e?.detail?.value ?? ''))
+}
+
+function onSpanTime(part: 'startTime' | 'endTime', e: any): void {
+  commitSpan(part, String(e?.detail?.value ?? ''))
+}
+
+function bumpMinutes(min: number): void {
+  if (!alive.value) return
+  const cur = span.value ?? { start: Date.now(), end: Date.now() + 3600_000 }
+  const start = cur.start
+  scheduleTask(t.value.id, start, start + min * 60000)
+  haptic('light')
+  toast(min >= 60 ? `时长改为 ${min / 60} 小时` : `时长改为 ${min} 分钟`)
 }
 
 function setTomorrow(): void {
@@ -358,6 +428,37 @@ function askAi(): void {
               </picker>
               <view class="minibtn" @tap="setTomorrow"><text>明天</text></view>
               <view class="minibtn" :class="{ on: t.date === '' }" @tap="clearDate"><text>未排期</text></view>
+            </view>
+
+            <!-- 时间段：开始 / 结束，可直接改日期与时间 -->
+            <view class="cr span-cr">
+              <text class="cl">时间段</text>
+              <view class="spanwrap">
+                <view class="spanline">
+                  <text class="span-k">开始</text>
+                  <picker mode="date" :value="span !== null ? fmtDate(span.start) : todayIso" @change="onSpanDate('startDate', $event)">
+                    <view class="spanchip mono"><text>{{ span !== null ? fmtDate(span.start).slice(5) : '未设置' }}</text></view>
+                  </picker>
+                  <picker mode="time" :value="span !== null ? fmtTime(span.start) : '09:00'" @change="onSpanTime('startTime', $event)">
+                    <view class="spanchip mono"><text>{{ span !== null ? fmtTime(span.start) : '--:--' }}</text></view>
+                  </picker>
+                </view>
+                <view class="spanline">
+                  <text class="span-k">结束</text>
+                  <picker mode="date" :value="span !== null ? fmtDate(span.end) : todayIso" @change="onSpanDate('endDate', $event)">
+                    <view class="spanchip mono"><text>{{ span !== null ? fmtDate(span.end).slice(5) : '未设置' }}</text></view>
+                  </picker>
+                  <picker mode="time" :value="span !== null ? fmtTime(span.end) : '10:00'" @change="onSpanTime('endTime', $event)">
+                    <view class="spanchip mono"><text>{{ span !== null ? fmtTime(span.end) : '--:--' }}</text></view>
+                  </picker>
+                </view>
+                <view class="spanquick">
+                  <view class="minibtn" @tap="bumpMinutes(30)"><text>30 分</text></view>
+                  <view class="minibtn" @tap="bumpMinutes(60)"><text>1 小时</text></view>
+                  <view class="minibtn" @tap="bumpMinutes(120)"><text>2 小时</text></view>
+                </view>
+                <text class="span-now mono">{{ spanLabelText }}</text>
+              </view>
             </view>
           </view>
 
@@ -689,6 +790,22 @@ function askAi(): void {
 .pridot.low { background: var(--t3); }
 
 .date-cr { gap: 6px; }
+
+/* ── 时间段 ─────────────────────────────────────────────────────────── */
+.span-cr { align-items: flex-start; flex-direction: column; }
+.spanwrap { width: 100%; display: flex; flex-direction: column; gap: 7px; }
+.spanline { display: flex; align-items: center; gap: 7px; }
+.span-k { width: 30px; flex: 0 0 30px; font-size: 10px; color: var(--t3); }
+.spanchip {
+  padding: 5px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--bd);
+  background: var(--s2);
+  color: var(--t1);
+  font-size: 11px;
+}
+.spanquick { display: flex; align-items: center; gap: 6px; }
+.span-now { font-size: 9px; color: var(--t3); letter-spacing: 0.02em; }
 
 .datechip {
   display: inline-flex;

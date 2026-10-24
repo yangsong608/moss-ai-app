@@ -12,18 +12,24 @@ MOSS AI App · 卡片与环境纹理生成器。
   3. **包体**。App 首包预算是 400KB（docs/05 §8），纹理必须能压到几十 KB。
      程序化生成 + WebP 有损压缩（含有损 alpha）可以精确控体积。
 
-## 分层职责（关键）
+## 分层职责
 
-图片负责**质感与结构**，强度由 CSS 的不透明度令牌控制（--tex-*-op）。
-两者分开的原因：同一张图要能被不同尺寸、不同底色的卡片复用，
-如果把强度烤进图片，就只能一图一用，包体会翻倍。
+图片只负责**图案与颜色**，最终强度由 CSS 的 opacity 令牌控制
+（--tex-card-op / --tex-hero-op / --tex-amb-op）。
+
+这个分工是刻意的：
+  - PNG 里的 alpha 是"图案遮罩"（哪里有纹、哪里干净），CSS opacity 是"整体强度"。
+  - 同一张图能被不同尺寸、不同底色的卡片复用，强度可以按场景调；
+    如果把强度烤进图片，就只能一图一用，包体会翻倍。
+  - 换成 <image> 组件 + CSS opacity 后，**整套主题只换一次 opacity 即可**，
+    换肤时不必重新解码图片。
 
 ## 三种角色
 
 | 角色 | 用在哪 | 特征 |
 |---|---|---|
-| card  | 笔记卡 / 资讯卡 / 看板列 / 设置组 | 图案集中在右下角，安静区留给标题摘要 |
-| hero  | 今天页大日期卡 / 我的页控制台卡 / 设备页状态台 | 密度更高，可占据右半幅 |
+| card  | 笔记卡 / 资讯卡 / 看板列 / 设置组 / 会话行 | 图案集中在右下角，安静区留给标题摘要 |
+| hero  | 今天页大日期卡 / 我的页控制台卡 / 设备页状态台 / 专注计时盘 | 密度更高，可占据右半幅 |
 | amb   | 页面级环境层 | 只有雷达弧环与大范围柔光，无细密图案 |
 
 amb 之所以不给密集图案：它铺在**整页**下面，而页面上的散落文字
@@ -64,7 +70,7 @@ OUT = os.path.normpath(os.path.join(HERE, '../../src/static/moss/tex'))
 # 纹理本身是柔和抽象图案，锐度损失看不出来，体积却省一半。
 W_CARD, H_CARD = 720, 448
 W_HERO, H_HERO = 840, 420
-W_AMB, H_AMB = 640, 640
+W_AMB, H_AMB = 480, 480
 
 SS = 2  # 图案绘制时的超采样倍数（抗锯齿）
 
@@ -85,9 +91,9 @@ class Profile:
 
 
 PROFILES = {
-    'card': Profile('card', W_CARD, H_CARD, 1.0, True, False, False, 0.44, 0.05, 20_000),
-    'hero': Profile('hero', W_HERO, H_HERO, 1.5, True, True, False, 0.46, 0.05, 26_000),
-    'amb': Profile('amb', W_AMB, H_AMB, 0.9, False, False, True, 0.72, 0.0, 14_000),
+    'card': Profile('card', W_CARD, H_CARD, 1.0, True, False, False, 0.46, 0.03, 16_000),
+    'hero': Profile('hero', W_HERO, H_HERO, 1.45, True, True, False, 0.50, 0.03, 20_000),
+    'amb': Profile('amb', W_AMB, H_AMB, 0.85, False, False, True, 0.78, 0.0, 8_000),
 }
 
 
@@ -112,26 +118,26 @@ THEMES: list[Theme] = [
     Theme(
         key='moss-dark', skin='moss', mode='dark',
         motif=(126, 255, 205), glow=(70, 227, 166), vignette=(0, 5, 4),
-        motif_alpha=0.30, glow_alpha=0.26, sheen=0.026, seed=20261024,
+        motif_alpha=0.62, glow_alpha=0.30, sheen=0.05, seed=20261024,
         motif_kind='filament',
     ),
     Theme(
         key='moss-light', skin='moss', mode='light',
-        motif=(14, 138, 95), glow=(14, 138, 95), vignette=(96, 124, 112),
-        motif_alpha=0.20, glow_alpha=0.11, sheen=0.030, seed=20261025,
+        motif=(14, 138, 95), glow=(14, 138, 95), vignette=(120, 148, 136),
+        motif_alpha=0.42, glow_alpha=0.22, sheen=0.06, seed=20261025,
         motif_kind='filament',
     ),
     # ── 550W 待机红（工业告警）─────────────────────────────────────────
     Theme(
         key='550w-dark', skin='550w', mode='dark',
         motif=(255, 152, 104), glow=(255, 59, 47), vignette=(8, 3, 2),
-        motif_alpha=0.28, glow_alpha=0.26, sheen=0.022, seed=20261026,
+        motif_alpha=0.60, glow_alpha=0.30, sheen=0.045, seed=20261026,
         motif_kind='crack',
     ),
     Theme(
         key='550w-light', skin='550w', mode='light',
-        motif=(180, 49, 31), glow=(180, 49, 31), vignette=(158, 112, 94),
-        motif_alpha=0.19, glow_alpha=0.10, sheen=0.030, seed=20261027,
+        motif=(180, 49, 31), glow=(180, 49, 31), vignette=(176, 132, 112),
+        motif_alpha=0.40, glow_alpha=0.21, sheen=0.06, seed=20261027,
         motif_kind='crack',
     ),
 ]
@@ -154,7 +160,7 @@ def quiet_mask(w: int, h: int, floor: float) -> np.ndarray:
     这是"不遮挡文字"的结构性保证，而不是靠调低整体不透明度
     （那会让纹理失去存在感）。
 
-    floor 是文字区允许的残留量。card/hero 取 0.05：
+    floor 是文字区允许的残留量。card/hero 取 0.03：
     完全为 0 会让左上出现一块"什么都没发生"的死区，看起来像图片没加载。
     amb 取 0：整页层不留任何图案残留。
     """
@@ -215,7 +221,7 @@ def draw_filament(w: int, h: int, theme: Theme) -> Image.Image:
             y += math.sin(ang) * step
             pts.append((x, y))
         # 越细的枝越透明：避免所有分支一样重，画面会显得平
-        a = max(12, int(max_alpha * (0.42 + 0.58 * (width / 3.0))))
+        a = max(24, int(max_alpha * (0.40 + 0.60 * (width / 3.0))))
         draw.line(pts, fill=rgb + (a,), width=width, joint='curve')
         if depth <= 0:
             return
@@ -272,7 +278,7 @@ def draw_crack(w: int, h: int, theme: Theme) -> Image.Image:
             x += math.cos(ang) * step
             y += math.sin(ang) * step
             pts.append((x, y))
-        a = max(14, int(max_alpha * (0.38 + 0.62 * (width / 3.0))))
+        a = max(28, int(max_alpha * (0.36 + 0.64 * (width / 3.0))))
         draw.line(pts, fill=rgb + (a,), width=width)
         if depth <= 0:
             return
@@ -312,7 +318,7 @@ def draw_hatch(w: int, h: int, theme: Theme) -> Image.Image:
     layer = Image.new('RGBA', (cw, ch), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     rgb = theme.motif
-    alpha = int(round(theme.motif_alpha * 255 * 0.62))
+    alpha = int(round(theme.motif_alpha * 255 * 0.55))
 
     x0 = int(cw * 0.60)
     y0 = int(ch * 0.54)
@@ -347,14 +353,14 @@ def draw_arcs(w: int, h: int, theme: Theme) -> Image.Image:
     layer = Image.new('RGBA', (cw, ch), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     rgb = theme.motif
-    max_alpha = int(round(theme.motif_alpha * 255 * 0.42))
+    max_alpha = int(round(theme.motif_alpha * 255 * 0.34))
 
     # 圆心在右下角，弧线向左上扩散
     cx, cy = cw * 1.06, ch * 1.04
     r = cw * 0.20
     i = 0
     while r < cw * 1.5:
-        a = max(8, int(max_alpha * (1.0 - i / 26.0) * rng.uniform(0.75, 1.0)))
+        a = max(10, int(max_alpha * (1.0 - i / 26.0) * rng.uniform(0.75, 1.0)))
         width = max(1, int((2.6 - i * 0.07) * SS))
         draw.ellipse(
             [cx - r, cy - r, cx + r, cy + r],
@@ -370,7 +376,7 @@ def draw_arcs(w: int, h: int, theme: Theme) -> Image.Image:
 # ── 合成 ────────────────────────────────────────────────────────────────
 
 
-def build_texture(theme: Theme, prof: Profile, seed_shift: int) -> Image.Image:
+def build_texture(theme: Theme, prof: Profile) -> Image.Image:
     """
     合成一张 RGBA 纹理。
 
@@ -475,7 +481,7 @@ def main() -> None:
 
     for theme in THEMES:
         for name, prof in PROFILES.items():
-            tex = build_texture(theme, prof, seed_shift=0)
+            tex = build_texture(theme, prof)
             path = os.path.join(OUT, f'{name}-{theme.key}.webp')
             size, q = save_webp(tex, path, quality=74, max_bytes=prof.cap_bytes)
             flag = '  ' if size <= prof.cap_bytes else '⚠ '
