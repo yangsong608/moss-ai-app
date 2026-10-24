@@ -859,10 +859,9 @@ body.immersive .topbar{opacity:.32}
 }
 /* ═══════════════ 断点：≥1100 平板横屏（三栏） ═══════════════ */
 @media (min-width:1100px) and (min-height:560px){
-  .rightcol{display:flex}
+  /* 横屏改为两栏：rail + 主区，详情走弹出层 */
   .pad{padding:18px 32px calc(32px + var(--safe-b))}
   .me-wrap{gap:16px}
-  .drawer{display:none}
 }
 @media (max-height:520px) and (orientation:landscape){
   .topbar{flex-basis:46px;height:46px}
@@ -876,7 +875,7 @@ body.immersive .topbar{opacity:.32}
 /* ── 收尾细则 ── */
 #s-chat{overflow:hidden}
 .agenda-main{display:block}
-@media (min-width:1100px) and (min-height:560px){.agenda-main{display:none}}
+@media (min-width:1100px) and (min-height:560px){.agenda-main{display:block}}
 @media (max-width:430px){
   .syncb .lbl{display:none}
   .syncb{padding:0 8px;gap:5px}
@@ -1801,7 +1800,7 @@ body{
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const isWide = () => window.matchMedia('(min-width:1100px) and (min-height:560px)').matches;
+const isWide = () => false; // 详情统一走弹出层（横屏也是两栏）
 
 /* ─────────── 数据 ─────────── */
 let TASKS = [
@@ -3038,6 +3037,10 @@ function sendChat() {
 const h = location.hash.replace('#', '');
 const boardDeep = h === 'today-board';
 if (['today','calendar','focus','news','me','chat','devices','notes'].includes(h)) go(h);
+if (h === 'today-detail') {
+  go('today');
+  setTimeout(() => selectTask((TASKS.find(t => !t.done) || TASKS[0]).id), 60);
+}
 if (boardDeep) {
   go('today');
   $('#taskBoard').hidden = false; $('#taskList').hidden = true;

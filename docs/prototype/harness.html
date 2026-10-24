@@ -13,7 +13,7 @@
 const CASES = [
   { name: 'phone', w: 390, h: 844, layout: 'bottom' },
   { name: 'tablet-portrait', w: 820, h: 1180, layout: 'left' },
-  { name: 'tablet-landscape', w: 1280, h: 800, layout: 'left+right' },
+  { name: 'tablet-landscape', w: 1280, h: 800, layout: 'left' },
 ]
 const TABS = [
   ['今天', ['今天', '收件箱']],
@@ -70,12 +70,20 @@ async function runCase(c) {
   if (nav) {
     if (c.layout === 'bottom') ok(nav.y > c.h * 0.75, `${c.name} 导航在底部（y=${Math.round(nav.y)}）`)
     else ok(nav.x < 160, `${c.name} 导航在左侧（x=${Math.round(nav.x)}）`)
-    if (c.layout === 'left+right') {
-      const right = [...doc.querySelectorAll('*')].some((e) => {
-        if (e.children.length > 0) return false
-        return /详情|队列|安排|冲突副本/.test(e.textContent ?? '') && e.getBoundingClientRect().x > c.w * 0.58
-      })
-      ok(right, `${c.name} 横屏右栏存在`)
+    if (c.name === 'tablet-landscape') {
+      // 横屏断言：两栏（无固定右栏）+ 详情以弹出层打开
+      const rc = doc.querySelector('.rightcol')
+      const rcHidden = !rc || win.getComputedStyle(rc).display === 'none'
+      ok(rcHidden, `${c.name} 无固定右栏（两栏布局）`)
+      const task = doc.querySelector('.lbody .trow')
+      if (task) {
+        task.click()
+        await new Promise((r) => setTimeout(r, 180))
+        const dr = doc.getElementById('drawer')
+        ok(!!dr && dr.classList.contains('on'), `${c.name} 点任务后详情以弹出层打开`)
+      } else {
+        ok(false, `${c.name} 未找到任务行，无法验证弹出层`)
+      }
     }
   } else {
     ok(false, `${c.name} 未找到导航 Tab「今天」`)

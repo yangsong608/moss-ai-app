@@ -29,11 +29,12 @@ const VIEWS = [
   ['notes', '#notes'],
   ['focus', '#focus'],
   ['news', '#news'],
+  ['detail', '#today-detail'],
 ]
 
 mkdirSync(resolve(HERE, 'shots'), { recursive: true })
 for (const [name, w, h] of VIEWPORTS) {
-  for (const [view, hash] of (name === 'phone' ? VIEWS : [['today', ''], ['board', '#today-board'], ['calendar', '#calendar']])) {
+  for (const [view, hash] of (name === 'phone' ? VIEWS : [['today', ''], ['detail', '#today-detail'], ['calendar', '#calendar']])) {
   execFileSync(CHROME, [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-software-rasterizer',
     '--use-gl=disabled', '--disable-breakpad', '--no-first-run', '--hide-scrollbars',
