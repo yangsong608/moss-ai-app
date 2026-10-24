@@ -699,16 +699,16 @@ onLoad(() => {
           <!-- 品牌状态台：品牌、标题、在线读数与连接状态集中在一层。 -->
           <view class="hero enter">
             <view class="hero-scan" />
-            <view class="hero-top">
-              <view class="brand">
-                <MossBadge :size="40" :working="anyWorking" :glow="!state.lite" />
-                <view class="brand-txt">
-                  <view class="brand-line">
-                    <text class="logo mono">MOSS</text>
-                    <view class="app-tag mono">CONTROL</view>
-                  </view>
-                  <text class="brand-sub mono">REMOTE DEVICE CONSOLE</text>
-                </view>
+            <!-- 行1：品牌 + 标题 + 状态 + 操作（四合一，去掉单独品牌行与大数字读数） -->
+            <view class="hero-head">
+              <MossBadge :size="30" :working="anyWorking" :glow="!state.lite" />
+              <view class="hero-head-txt">
+                <text class="hero-head-t">设备与配对</text>
+                <text class="hero-head-s mono">MOSS REMOTE CONSOLE</text>
+              </view>
+              <view class="status-pill" :class="{ idle: onlineCount === 0 }">
+                <view class="status-pill-dot" />
+                <text>{{ onlineCount > 0 ? '链路在线' : needAuth.length > 0 ? '等待确认' : '等待连接' }}</text>
               </view>
               <view class="top-actions">
                 <view
@@ -731,39 +731,28 @@ onLoad(() => {
               </view>
             </view>
 
-            <view class="hero-main">
-              <view class="hero-copy">
-                <text class="hero-kicker mono">DEVICE &amp; PAIRING</text>
-                <text class="hero-title">设备与配对</text>
-                <text class="hero-desc">连上电脑，任务继续跑</text>
+            <!-- 行2：统计收成一行 chip，不再三格大数字 -->
+            <view class="hero-chips">
+              <view class="hchip">
+                <text class="hchip-v mono">{{ String(onlineCount).padStart(2, '0') }}</text>
+                <text class="hchip-k">在线</text>
               </view>
-              <view class="online-readout">
-                <text class="online-n mono">{{ String(onlineCount).padStart(2, '0') }}</text>
-                <text class="online-k mono">ONLINE</text>
-                <view class="status-pill" :class="{ idle: onlineCount === 0 }">
-                  <view class="status-pill-dot" />
-                  <text>{{ onlineCount > 0 ? '链路在线' : needAuth.length > 0 ? '等待确认' : '等待连接' }}</text>
-                </view>
+              <view class="hchip">
+                <text class="hchip-v mono">{{ pairedDevices.length }}</text>
+                <text class="hchip-k">已配对</text>
               </view>
+              <view class="hchip" :class="{ warn: needAuth.length > 0 }">
+                <text class="hchip-v mono">{{ needAuth.length }}</text>
+                <text class="hchip-k">待确认</text>
+              </view>
+              <view class="hchip" :class="{ warn: state.waiting > 0 }">
+                <text class="hchip-v mono">{{ state.waiting }}</text>
+                <text class="hchip-k">待处理</text>
+              </view>
+              <text class="hchip-live mono">LIVE / {{ refreshing ? 'SYNC' : 'READY' }}</text>
             </view>
 
-            <view class="hero-stats">
-              <view class="hero-stat">
-                <text class="hero-stat-v mono">{{ pairedDevices.length }}</text>
-                <text class="hero-stat-k">已配对设备</text>
-              </view>
-              <view class="hero-stat">
-                <text class="hero-stat-v mono" :class="{ warn: needAuth.length > 0 }">{{ needAuth.length }}</text>
-                <text class="hero-stat-k">待确认</text>
-              </view>
-              <view class="hero-stat">
-                <text class="hero-stat-v mono" :class="{ warn: state.waiting > 0 }">{{ state.waiting }}</text>
-                <text class="hero-stat-k">待处理任务</text>
-              </view>
-              <text class="hero-live mono">LIVE / {{ refreshing ? 'SYNC' : 'READY' }}</text>
-            </view>
-
-            <!-- 配对操作区：扫码 / 输入配对码，放在头部卡片里（不再占底部 dock） -->
+            <!-- 行3：配对操作 -->
             <view class="hero-pair">
               <view class="hero-cta" @tap="addDevice">
                 <text class="hero-cta-plus">＋</text>
@@ -1130,34 +1119,33 @@ onLoad(() => {
   to { transform: translate3d(48%, 0, 0); opacity: 0.5; }
 }
 
-.hero-top,
-.hero-main,
-.hero-stats { position: relative; z-index: 1; }
+.hero-head,
+.hero-chips,
+.hero-pair { position: relative; z-index: 1; }
 
-.hero-top { display: flex; align-items: center; gap: 10px; }
-.brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
-.brand-txt { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.brand-line { display: flex; align-items: center; gap: 8px; }
+/* 行1：品牌/标题/状态/操作 一行搞定 */
+.hero-head { display: flex; align-items: center; gap: 10px; }
+.hero-head-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.hero-head-t { color: var(--t1); font-size: 17px; font-weight: 750; letter-spacing: -0.2px; line-height: 1.15; }
+.hero-head-s { color: var(--t3); font-size: 8px; letter-spacing: 1.1px; white-space: nowrap; }
 
-.logo {
-  color: var(--t1);
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: 3px;
-}
-
-.app-tag {
-  padding: 2px 5px;
+/* 行2：统计 chip 条（替代原三格大数字） */
+.hero-chips { display: flex; align-items: center; gap: 7px; margin-top: 11px; flex-wrap: wrap; }
+.hchip {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
   border: 1px solid var(--bd);
-  border-radius: 4px;
-  color: var(--acc);
-  font-size: 7.5px;
-  line-height: 1.4;
-  letter-spacing: 0.8px;
+  border-radius: 999px;
+  background: var(--acc-soft);
 }
+.hchip.warn { border-color: color-mix(in srgb, var(--warn) 46%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.hchip-v { color: var(--t1); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.hchip.warn .hchip-v { color: var(--warn); }
+.hchip-k { color: var(--t3); font-size: 8px; white-space: nowrap; }
+.hchip-live { margin-left: auto; color: var(--t3); font-size: 7px; letter-spacing: 0.6px; }
 
-.brand-sub { color: var(--t3); font-size: 8px; letter-spacing: 1.1px; white-space: nowrap; }
 .top-actions { display: flex; flex: none; gap: 7px; }
 
 .iconbtn {
@@ -1171,43 +1159,15 @@ onLoad(() => {
   color: var(--t2);
   transition: transform 90ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
 }
-
 .iconbtn:active { transform: scale(0.97); }
 .iconbtn.spin .glyph { animation: spin 900ms linear infinite; }
 .glyph { font-size: 15px; line-height: 1; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.hero-main { display: flex; align-items: flex-end; gap: 12px; margin-top: 24px; padding-bottom: 20px; }
-.hero-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.hero-kicker { margin-bottom: 6px; color: var(--acc); font-size: 8px; letter-spacing: 1.4px; }
-
-.hero-title {
-  color: var(--t1);
-  font-size: 30px;
-  font-weight: 750;
-  line-height: 1.25;
-  letter-spacing: -0.6px;
-}
-
-.hero-desc { margin-top: 7px; color: var(--t2); font-size: 12px; letter-spacing: 0.4px; }
-.online-readout { flex: none; display: flex; flex-direction: column; align-items: flex-end; }
-
-.online-n {
-  color: var(--t1);
-  font-size: 40px;
-  font-weight: 500;
-  line-height: 0.95;
-  letter-spacing: -2px;
-  font-variant-numeric: tabular-nums;
-}
-
-.online-k { margin-top: 5px; color: var(--t3); font-size: 7px; letter-spacing: 1.8px; }
-
 .status-pill {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-top: 9px;
   padding: 4px 7px;
   border: 1px solid var(--bd);
   border-radius: 999px;
@@ -1216,33 +1176,10 @@ onLoad(() => {
   font-size: 9px;
   line-height: 1;
   white-space: nowrap;
+  flex: none;
 }
-
 .status-pill.idle { color: var(--t2); }
 .status-pill-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
-
-.hero-stats {
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  border-top: 1px solid var(--bd);
-}
-
-.hero-stat {
-  min-width: 67px;
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  padding-right: 12px;
-  margin-right: 12px;
-  border-right: 1px solid var(--bd);
-}
-
-.hero-stat-v { color: var(--t1); font-size: 13px; font-weight: 650; }
-.hero-stat-v.warn { color: var(--warn); }
-.hero-stat-k { color: var(--t3); font-size: 8px; white-space: nowrap; }
-.hero-live { margin-left: auto; color: var(--t3); font-size: 7px; letter-spacing: 0.6px; }
 
 /* ── 区块导航 ──────────────────────────────────────────────────────── */
 .block { margin-top: 24px; }
@@ -1701,7 +1638,7 @@ onLoad(() => {
   .devices-block { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
   .devices-block .block-head, .devices-block .empty { grid-column: 1 / -1; }
   .dev { min-width: 0; }
-  .hero-title { font-size: 34px; }
+  .hero-head-t { font-size: 19px; }
 }
 
 /* 横屏平板：配对按钮已收进头部卡，无底部 dock，主体留白不需额外预留。 */
