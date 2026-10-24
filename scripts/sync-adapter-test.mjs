@@ -168,8 +168,88 @@ test('任务往返：task → row → task 保持主要字段（when 数值化�
   assert.equal(again.when, back.when) // 再跑一次稳定
 })
 
-test('时间戳格式：YYYY-MM-DD HH:MM:SS，不含 ISO 的 T/Z', () => {
-  const text = adapt.ts.format(AT)
+/* ─── 跨天区间（startAt/endAt）─── */
+
+const NIGHT_START = new Date(2026, 9, 24, 22, 0, 0).getTime() // 10-24 22:00
+const NIGHT_END = new Date(2026, 9, 25, 8, 0, 0).getTime() //   10-25 08:00
+
+test('有 startAt/endAt：跨天任务写 date=起始日、start/end、duration 总分钟', () => {
+  const row = adapt.task.toRow(makeTask({ startAt: NIGHT_START, endAt: NIGHT_END }))
+  assert.equal(row.date, DAY) // 起始日，不是结束日
+  assert.equal(row.start, '22:00')
+  assert.equal(row.end, '08:00')
+  assert.equal(row.duration, 600) // 10 小时 = 600 分钟
+})
+
+test('有 startAt/endAt：同天跨小时任务 duration 正确', () => {
+  const start = new Date(2026, 9, 24, 14, 0, 0).getTime()
+  const end = new Date(2026, 9, 24, 14, 45, 0).getTime()
+  const row = adapt.task.toRow(makeTask({ startAt: start, endAt: end }))
+  assert.equal(row.start, '14:00')
+  assert.equal(row.end, '14:45')
+  assert.equal(row.duration, 45)
+})
+
+test('无 startAt/endAt：只写 start，不凭空发明 end/duration', () => {
+  const row = adapt.task.toRow(makeTask({ when: '9:30' }))
+  assert.equal(row.start, '09:30')
+  assert.equal(row.end, '')
+  assert.equal(row.duration, 0)
+})
+
+test('行 → 任务：end ≤ start 判定跨天，区间落在次日', () => {
+  const task = adapt.task.fromRow(
+    { title: '夜间值班', date: DAY, start: '22:00', end: '08:00', duration: 600 },
+    't6',
+    { updatedAt: AT },
+  )
+  assert.equal(task.startAt, NIGHT_START)
+  assert.equal(task.endAt, NIGHT_END)
+})
+
+test('行 → 任务：duration 比 end 更权威（差超过 1 分钟时以 duration 为准）', () => {
+  const task = adapt.task.fromRow(
+    { title: '长会', date: DAY, start: '14:00', end: '14:30', duration: 120 },
+    't7',
+    { updatedAt: AT },
+  )
+  assert.equal(task.endAt, new Date(2026, 9, 24, 16, 0, 0).getTime())
+})
+
+test('行 → 任务：只有 start 时按 1 小时补齐（与 taskSpan 同口径）', () => {
+  const task = adapt.task.fromRow({ title: '周报', date: DAY, start: '14:05' }, 't8', { updatedAt: AT })
+  assert.equal(task.startAt, new Date(2026, 9, 24, 14, 5, 0).getTime())
+  assert.equal(task.endAt, new Date(2026, 9, 24, 15, 5, 0).getTime())
+})
+
+test('行 → 任务：未排期（无 start / 无 date）不给区间', () => {
+  const noStart = adapt.task.fromRow({ title: '整理发票', date: DAY }, 't9', { updatedAt: AT })
+  assert.equal(noStart.startAt, undefined)
+  assert.equal(noStart.endAt, undefined)
+  const noDate = adapt.task.fromRow({ title: '整理发票', start: '09:00' }, 't10', { updatedAt: AT })
+  assert.equal(noDate.startAt, undefined)
+})
+
+test('行 → 任务：远端清空时间时区间字段显式 undefined（不残留旧值）', () => {
+  const before = makeTask({ startAt: NIGHT_START, endAt: NIGHT_END })
+  const after = adapt.task.fromRow({ title: before.title, date: DAY }, before.id, { prev: before, updatedAt: AT })
+  assert.equal('startAt' in after, true) // 键必须在，Object.assign 才会覆盖
+  assert.equal(after.startAt, undefined)
+  assert.equal('endAt' in after, true)
+  assert.equal(after.endAt, undefined)
+})
+
+test('跨天往返：task(22:00→次日08:00) → row → task 区间不变', () => {
+  const task = makeTask({ startAt: NIGHT_START, endAt: NIGHT_END })
+  const back = adapt.task.fromRow(adapt.task.toRow(task), task.id, { prev: undefined, updatedAt: task.updatedAt })
+  assert.equal(back.startAt, task.startAt)
+  assert.equal(back.endAt, task.endAt)
+  const again = adapt.task.fromRow(adapt.task.toRow(back), back.id, { prev: back, updatedAt: back.updatedAt })
+  assert.equal(again.startAt, back.startAt)
+  assert.equal(again.endAt, back.endAt)
+})
+
+test('时间戳格式：YYYY-MM-DD HH:MM:SS，不含 ISO 的 T/Z', () => {  const text = adapt.ts.format(AT)
   assert.match(text, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
   assert.equal(text.includes('T'), false)
   assert.equal(text.includes('Z'), false)

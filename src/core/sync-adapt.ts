@@ -92,6 +92,19 @@ export function overlapCursor(cursor: string, minutes = 5): string {
 
 /* ─────────── when ↔ start ─────────── */
 
+/** epoch 毫秒 → 当天 `HH:MM`（宿主 start/end 列只存时刻，日期在 date 列） */
+function timePart(ms: number): string {
+  const d = new Date(ms)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/** `YYYY-MM-DD` → 当天 0 点毫秒；非法返回 NaN */
+function dayStartOf(iso: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso.trim())
+  if (m === null) return Number.NaN
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0).getTime()
+}
+
 /**
  * 本地 `when` → 宿主 `start`。
  *
@@ -136,22 +149,109 @@ export interface TaskAdaptOptions {
   dev?: string
 }
 
-/** 本地 Task → 宿主 tasks 行（只发映射表字段，宿主按 `{...当前行, ...row}` 合并） */
+/**
+ * 本地任务自带的绝对区间（只认显式 startAt/endAt）。
+ *
+ * 不在这里用 date + when 推导：那是 `workbench.ts` 的 `taskSpan` 的职责，
+ * 本文件要能在 node 里单测（不能 import 带 uni storage 的 workbench 值）。
+ */
+function spanOf(task: Task): { start: number; end: number } | undefined {
+  if (typeof task.startAt === 'number' && typeof task.endAt === 'number' && task.endAt > task.startAt) {
+    return { start: task.startAt, end: task.endAt }
+  }
+  return undefined
+}
+
+/**
+ * 宿主行 → 本地绝对区间（`startAt`/`endAt`）。
+ *
+ * 宿主 tasks 表没有 startAt/endAt 列，跨天区间只能靠四列拼回来：
+ * `date`(YYYY-MM-DD) + `start`/`end`(HH:MM) + `duration`(分钟总数)。
+ *   1. `end <= start` 判定跨到次日（22:00 → 08:00 即次日）；
+ *   2. `duration` 是宿主算日历块高度用的总分钟数，比 end 更权威——
+ *      两者差超过 1 分钟时以 duration 为准（宿主 UI 也按它画）；
+ *   3. 只有 start 没有 end/duration 时按 1 小时补齐，与 `workbench.taskSpan` 同口径。
+ *
+ * 没有 start（未排期）或没有 date 时返回 undefined：保持「未排期」语义，
+ * 不要把它升级成一个具体时刻。
+ */
+function spanFromRow(row: Record<string, unknown>, date: string, start: string): { start: number; end: number } | undefined {
+  const hmm = /^(\d{1,2}):(\d{2})$/.exec(start.trim())
+  if (hmm === null || date === '') return undefined
+  const hour = Number(hmm[1])
+  const minute = Number(hmm[2])
+  if (hour > 23 || minute > 59) return undefined
+  const base = dayStartOf(date)
+  if (!Number.isFinite(base)) return undefined
+  const startAt = base + (hour * 60 + minute) * 60_000
+
+  let endAt: number | undefined
+  const endText = readString(row.end).trim()
+  const endHm = /^(\d{1,2}):(\d{2})$/.exec(endText)
+  if (endHm !== null) {
+    const endHour = Number(endHm[1])
+    const endMinute = Number(endHm[2])
+    if (endHour <= 23 && endMinute <= 59) {
+      let end = base + (endHour * 60 + endMinute) * 60_000
+      if (end < startAt) end += 24 * 3600_000 // 跨天：22:00 → 次日 08:00
+      endAt = end
+    }
+  }
+  const duration = Number(row.duration)
+  if (Number.isFinite(duration) && duration > 0) {
+    const byDuration = startAt + Math.round(duration) * 60_000
+    if (endAt === undefined || Math.abs(byDuration - endAt) > 60_000) endAt = byDuration
+  }
+  if (endAt === undefined || endAt <= startAt) endAt = startAt + 3600_000
+  return { start: startAt, end: endAt }
+}
+
+/**
+ * 本地 Task → 宿主 tasks 行（只发映射表字段，宿主按 `{...当前行, ...row}` 合并）。
+ *
+ * 有两套来源：
+ *   - 有绝对区间（startAt/endAt，跨天/跨小时都靠它）：写 date/start/end/duration，
+ *     date 取**起始日**，duration 写总分钟数（宿主的跨天判定就是 duration ≥ 480）；
+ *   - 只有 when（当天某时刻）：沿用原行为，只写 start 不写 end，不动日期。
+ */
 export function taskToRow(task: Task): Record<string, unknown> {
+  const span = spanOf(task)
+  if (span === undefined) {
+    return {
+      title: task.title,
+      status: task.status,
+      priority: task.pri,
+      date: task.date,
+      start: whenToStart(task.when),
+      end: '',
+      duration: 0,
+    }
+  }
+  const startDay = new Date(span.start)
+  const date = `${startDay.getFullYear()}-${pad2(startDay.getMonth() + 1)}-${pad2(startDay.getDate())}`
   return {
     title: task.title,
     status: task.status,
     priority: task.pri,
-    date: task.date,
-    start: whenToStart(task.when),
-    end: '',
+    date,
+    start: timePart(span.start),
+    end: timePart(span.end),
+    duration: Math.max(1, Math.round((span.end - span.start) / 60_000)),
   }
 }
 
-/** 宿主 tasks 行 → 本地 Task（`when` 由 start 生成） */
+/**
+ * 宿主 tasks 行 → 本地 Task（`when` 由 start 生成，跨天区间由 date/start/end/duration 还原）。
+ *
+ * 注意 `startAt`/`endAt` **总是**出现在返回值里（没有区间就是 undefined）：
+ * 同步走 `Object.assign(local, fromRow(...))`，字段缺省会让本地残留旧区间——
+ * 远端把任务改成「未排期」时，本地就会一直显示旧时间。
+ */
 export function taskFromRow(row: Record<string, unknown>, id: string, options: TaskAdaptOptions = {}): Task {
   const prev = options.prev
   const start = readString(row.start)
+  const date = readString(row.date, prev?.date ?? '')
+  const span = spanFromRow(row, date, start)
   const tags = readStringArray(row.tags)
   return {
     id,
@@ -159,7 +259,7 @@ export function taskFromRow(row: Record<string, unknown>, id: string, options: T
     note: prev?.note ?? '',
     status: TASK_STATUSES.includes(row.status as TaskStatus) ? (row.status as TaskStatus) : prev?.status ?? 'next',
     pri: PRIORITIES.includes(row.priority as Priority) ? (row.priority as Priority) : prev?.pri ?? 'normal',
-    date: readString(row.date, prev?.date ?? ''),
+    date,
     when: startToWhen(start),
     tags: tags ?? prev?.tags ?? [],
     sub: prev?.sub ?? [],
@@ -167,6 +267,8 @@ export function taskFromRow(row: Record<string, unknown>, id: string, options: T
     dev: options.dev ?? prev?.dev ?? '',
     sync: prev?.sync ?? true,
     conflict: prev?.conflict ?? false,
+    startAt: span?.start,
+    endAt: span?.end,
     createdAt: prev?.createdAt ?? (parseTs(row.createdAt) || options.updatedAt || Date.now()),
     updatedAt: options.updatedAt ?? prev?.updatedAt ?? Date.now(),
   }

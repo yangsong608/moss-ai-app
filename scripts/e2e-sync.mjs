@@ -35,6 +35,20 @@ function log(ok, label, extra = '') {
   if (!ok) failed += 1
 }
 
+/**
+ * 本地时间、秒级、无 T/Z 的时间戳（与 src/core/sync-adapt.ts 的 formatTs 同口径）。
+ *
+ * 不能用 toISOString()：宿主用**字符串字典序**比较 `updated_at > since`，
+ * UTC 串在东八区会比重叠游标早 8 小时——行确实落库了，但 delta 永远拉不到。
+ * 这正是 docs/sync-protocol.md §7 明令禁止的写法（曾导致 push 通过、delta 断言失败）。
+ */
+function localStamp(ms = Date.now()) {
+  const d = new Date(ms)
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 let failed = 0
 let base = ''
 
@@ -83,7 +97,7 @@ if (cursor.length > 0) {
 }
 
 if (WRITE) {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19)
+  const stamp = localStamp()
   const probeId = `e2e-${Date.now().toString(36)}`
   const pushed = await get(base, '/workbench-api/sync/push', {
     method: 'POST',
