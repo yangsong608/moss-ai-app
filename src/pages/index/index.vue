@@ -1641,11 +1641,25 @@ onLoad(() => {
   .hero-head-t { font-size: 19px; }
 }
 
-/* 横屏平板：配对按钮已收进头部卡，无底部 dock，主体留白不需额外预留。 */
+/* 横屏平板：配对操作右对齐成紧凑组（不再把主按钮拉满整行） */
 @media (min-width: 900px) {
-  .hero-pair { flex-direction: row; align-items: center; gap: 10px; }
-  .hero-cta { flex: 1; height: 44px; }
-  .hero-pair-alt { flex: 0 0 auto; min-height: 44px; }
+  .hero-pair {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .hero-cta { flex: 0 0 auto; width: 196px; height: 40px; border-radius: 13px; font-size: 13.5px; }
+  .hero-pair-alt {
+    flex: 0 0 auto;
+    min-height: 0;
+    height: 40px;
+    padding: 0 4px;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .hero-cta-code { right: 12px; }
 }
 
 /* state.lite：本页全部动画关闭；:deep 同时覆盖 MossDot / MossBadge 等子组件。 */
