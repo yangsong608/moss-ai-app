@@ -762,6 +762,18 @@ onLoad(() => {
               </view>
               <text class="hero-live mono">LIVE / {{ refreshing ? 'SYNC' : 'READY' }}</text>
             </view>
+
+            <!-- 配对操作区：扫码 / 输入配对码，放在头部卡片里（不再占底部 dock） -->
+            <view class="hero-pair">
+              <view class="hero-cta" @tap="addDevice">
+                <text class="hero-cta-plus">＋</text>
+                <text class="hero-cta-t">扫码配对</text>
+                <text class="hero-cta-code mono">PAIR</text>
+              </view>
+              <view class="hero-pair-alt" @tap="addDevice">
+                <text>或输入 6 位配对码</text><text class="hero-pair-arrow">↗</text>
+              </view>
+            </view>
           </view>
 
           <!-- 待确认配对：独立成块，主列表由 pairedDevices 保证不重复。 -->
@@ -918,20 +930,6 @@ onLoad(() => {
           </view>
         </view>
       </scroll-view>
-
-      <!-- 固定在底部的配对 dock，包含真实底部安全区。 -->
-      <view class="dock">
-        <view class="dock-inner">
-          <view class="cta" @tap="addDevice">
-            <text class="cta-plus">＋</text>
-            <text class="cta-t">扫码配对</text>
-            <text class="cta-code mono">PAIR</text>
-          </view>
-          <view class="dock-alt" @tap="addDevice">
-            <text>或输入 6 位配对码</text><text class="dock-alt-arrow">↗</text>
-          </view>
-        </view>
-      </view>
     </view>
 
     <!-- 锁屏浮层：手机上仍可看，只是不能写 -->
@@ -1562,55 +1560,45 @@ onLoad(() => {
 .foot-lock { position: relative; width: 7px; height: 6px; margin-right: 2px; border: 1px solid var(--t3); border-radius: 1px; }
 .foot-lock::before { content: ''; position: absolute; left: 1px; top: -5px; width: 3px; height: 4px; border: 1px solid var(--t3); border-bottom: 0; border-radius: 3px 3px 0 0; }
 
-/* ── 底部配对 dock / 安全区 ────────────────────────────────────────── */
-.dock {
-  flex: none;
-  padding: 14px var(--gutter) calc(var(--safe-bottom-real, env(safe-area-inset-bottom)) + 4px);
-  border-top: 1px solid var(--bd);
-  background: linear-gradient(180deg, transparent, var(--glass-bottom) 30%, var(--bg));
-}
+/* ── 头部配对操作区（按钮放在 hero 卡内，不再有底部 dock） ───────────── */
+.hero-pair { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
 
-.dock-inner { width: 100%; max-width: var(--content-max); margin: 0 auto; display: flex; flex-direction: column; gap: 5px; }
-
-.cta {
+.hero-cta {
   position: relative;
-  height: 54px;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--acc) 78%, var(--t1));
-  border-radius: 17px;
+  border-radius: 15px;
   background: linear-gradient(110deg, color-mix(in srgb, var(--acc) 82%, var(--bg)), var(--acc) 52%, color-mix(in srgb, var(--acc) 76%, var(--t1)));
-  box-shadow: var(--cta-shadow), inset 0 1px 0 var(--glass-hi);
+  box-shadow: var(--cta-shadow, 0 8px 22px color-mix(in srgb, var(--acc) 30%, transparent)), inset 0 1px 0 var(--glass-hi, transparent);
   color: var(--acc-ink);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 750;
   letter-spacing: 0.5px;
   transition: transform 90ms ease-out, opacity 90ms ease-out;
 }
+.hero-cta:active { transform: scale(0.97); opacity: 0.96; }
+.hero-cta-plus { position: relative; z-index: 1; font-size: 17px; line-height: 1; }
+.hero-cta-t { position: relative; z-index: 1; line-height: 1; }
+.hero-cta-code { position: absolute; z-index: 1; right: 13px; font-size: 7px; font-weight: 500; letter-spacing: 1px; opacity: 0.6; }
 
-.cta::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 28%;
-  background: linear-gradient(90deg, transparent, var(--glass-hi), transparent);
-  opacity: 0.35;
-  pointer-events: none;
-  transform: translateX(-140%) skewX(-18deg);
+.hero-pair-alt {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--t2);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  transition: transform 90ms ease-out, color 160ms ease-out;
 }
-
-.cta:active { transform: scale(0.97); opacity: 0.96; }
-.cta-plus { position: relative; z-index: 1; font-size: 18px; line-height: 1; }
-.cta-t { position: relative; z-index: 1; line-height: 1; }
-.cta-code { position: absolute; z-index: 1; right: 15px; font-size: 7px; font-weight: 500; letter-spacing: 1px; opacity: 0.6; }
-.dock-alt { min-height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--t2); font-size: 10px; letter-spacing: 0.3px; transition: transform 90ms ease-out, color 160ms ease-out; }
-.dock-alt:active { transform: scale(0.97); color: var(--acc); }
-.dock-alt-arrow { color: var(--acc); font-size: 11px; }
+.hero-pair-alt:active { transform: scale(0.97); color: var(--acc); }
+.hero-pair-arrow { color: var(--acc); font-size: 11px; }
 
 /* ── 弹层与配对流程（交互不变） ─────────────────────────────────────── */
 .mask {
@@ -1716,32 +1704,11 @@ onLoad(() => {
   .hero-title { font-size: 34px; }
 }
 
-/* 横屏平板：配对操作收成右下浮动组，主体留白保证末项可完整滚出。 */
+/* 横屏平板：配对按钮已收进头部卡，无底部 dock，主体留白不需额外预留。 */
 @media (min-width: 900px) {
-  .wrap { padding-bottom: 148px; }
-
-  .dock {
-    position: absolute;
-    right: max(var(--gutter), calc((100% - var(--content-max)) / 2 + var(--gutter)));
-    bottom: calc(var(--safe-bottom-real, env(safe-area-inset-bottom)) + 20px);
-    width: auto;
-    padding: 10px 12px 8px;
-    border: 1px solid var(--bd);
-    border-radius: 20px;
-    background: linear-gradient(145deg, var(--glass-top), var(--glass-bottom));
-    box-shadow: var(--card-shadow), inset 0 1px 0 var(--glass-hi);
-  }
-
-  .dock-inner { width: max-content; max-width: none; margin: 0; gap: 6px; }
-
-  .cta {
-    width: 194px;
-    height: 42px;
-    border-radius: 12px;
-    font-size: 14px;
-  }
-
-  .dock-alt { min-height: 24px; font-size: 11px; }
+  .hero-pair { flex-direction: row; align-items: center; gap: 10px; }
+  .hero-cta { flex: 1; height: 44px; }
+  .hero-pair-alt { flex: 0 0 auto; min-height: 44px; }
 }
 
 /* state.lite：本页全部动画关闭；:deep 同时覆盖 MossDot / MossBadge 等子组件。 */
