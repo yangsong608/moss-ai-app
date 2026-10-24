@@ -106,11 +106,11 @@ for (const [name, width, height] of [['phone', 390, 844], ['tablet-landscape', 1
   const r3 = await page.evaluate(() => {
     const out = {}
     document.querySelector('[data-act="modal-close"]')?.click()
-    // 8 我的：入口 → 子屏 → 返回
+    // 8 我的：入口 → 子屏 → 返回（笔记已是顶级 Tab）
     document.querySelector('[data-go="me"]').click()
-    out.home = !document.querySelector('#meHome').hidden && document.querySelector('#meNotes').hidden
-    document.querySelector('.me-entry[data-me="notes"]').click()
-    out.notes = !document.querySelector('#meNotes').hidden
+    out.home = !document.querySelector('#meHome').hidden && document.querySelector('#meSettings').hidden
+    document.querySelector('.me-entry[data-go="notes"]').click()
+    out.notes = document.querySelector('#s-notes').classList.contains('on') && document.querySelectorAll('.notecard').length > 0
     // 笔记卡片 + 编辑器
     document.querySelector('[data-note="n2"]').click()
     out.editor = !!document.querySelector('[data-act="ai-polish"]')
@@ -128,7 +128,8 @@ for (const [name, width, height] of [['phone', 390, 844], ['tablet-landscape', 1
     if (window.innerWidth < 820) document.querySelector('[data-act="note-close"]').click()
     // 设置子屏
     document.querySelector('[data-act="note-mode"][data-v="preview"]')?.click()
-    document.querySelector('#meNotes [data-me="settings"]').click()
+    document.querySelector('[data-go="me"]').click()
+    document.querySelector('.me-entry[data-me="settings"]').click()
     out.settings = !document.querySelector('#meSettings').hidden
     out.rows = document.querySelectorAll('#meSettings .setrow').length
     // 设备子屏（data-go 路由）
@@ -143,7 +144,7 @@ for (const [name, width, height] of [['phone', 390, 844], ['tablet-landscape', 1
     out.qdev = document.querySelector('#quickDevName').textContent === '仅本机'
     return out
   })
-  ok(r3.home && r3.notes, '我的：大入口 → 笔记子屏')
+  ok(r3.home && r3.notes, '我的：大入口 → 笔记屏（顶级 Tab）')
   ok(r3.editor && r3.full, '笔记卡片 → 编辑器（手机全屏）')
   ok(r3.src && r3.words, '预览/编辑切换 + 字数实时更新')
   ok(r3.toTask, '转为任务 / 导出 MD（toast）')

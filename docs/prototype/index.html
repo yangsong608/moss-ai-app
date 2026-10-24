@@ -971,6 +971,34 @@ body{
 .notes-wrap .nbcol .nb{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh)}
 .notecol .notecard{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:16px}
 .notes-wrap .editor{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:18px}
+
+/* ═══════════ 清单模式：安静的分组列表（无卡片外壳/无冗余 chip） ═══════════ */
+.lgroup{margin-top:18px}
+.lhead{display:flex;align-items:center;gap:8px;padding:2px 4px 9px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.lhead .lt{font-size:12px;font-weight:650;letter-spacing:.05em;color:var(--t2)}
+.lhead .ln{font:600 10.5px/1 var(--mono);color:var(--t3);padding:3.5px 7px;border-radius:999px;
+  background:var(--card);border:1px solid var(--card-line)}
+.lhead .lchev{width:14px;height:14px;color:var(--t3);transition:transform var(--t-mid) var(--ease-out)}
+.lgroup.collapsed .lchev{transform:rotate(-90deg)}
+.lgroup.collapsed .lbody{display:none}
+.lbody{background:var(--card);border:1px solid var(--card-line);border-radius:16px;box-shadow:var(--sh);padding:2px 6px;overflow:hidden}
+.lbody .trow{display:flex;align-items:center;gap:12px;padding:13px 10px;border-radius:10px;cursor:pointer;position:relative}
+.lbody .trow + .trow{box-shadow:inset 0 1px 0 var(--card-line)}
+.lbody .trow:hover{background:color-mix(in srgb,var(--s2) 55%,transparent)}
+.lbody .trow.sel{background:var(--acc-soft);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 30%,transparent)}
+.lbody .trow .tbody{flex:1;min-width:0}
+.lbody .trow .tt{display:block;font-size:14.5px;font-weight:520;line-height:1.45;color:var(--t1);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lbody .trow .tmeta{display:flex;align-items:center;gap:8px;margin-top:3px}
+.lbody .trow .tmeta:empty{display:none}
+.tmi{font-size:11px;color:var(--t3);white-space:nowrap}
+.tmi.twarn{color:var(--warn);font-weight:600}
+.twhen{flex:0 0 auto;font-size:11.5px;color:var(--t3);white-space:nowrap}
+.twhen.due{color:var(--warn)}
+.lbody .trow.high .tt{font-weight:600}
+.lbody .trow.done .tt{color:var(--t3);text-decoration:line-through;text-decoration-thickness:1.2px}
+.lbody .trow.done .twhen{color:var(--t3)}
+.lempty{padding:22px 10px;text-align:center;font-size:11.5px;color:var(--t3)}
 </style>
 </head>
 <body class="dsh" data-skin="moss" data-light="1">
@@ -1712,10 +1740,10 @@ const IC = {
   spark:'<svg class="ic sm" viewBox="0 0 24 24"><path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z"/></svg>',
 };
 const GROUPS = [
-  { k:'today', label:'今天 · 10月24日', sub:'先难后易 · 按时间推进', icon:IC.sun, tone:'' },
-  { k:'scheduled', label:'已排期', sub:'未来几天的安排', icon:IC.cal, tone:'mut' },
-  { k:'inbox', label:'收件箱', sub:'还没排时间 · 稍后整理', icon:IC.inbox, tone:'mut' },
-  { k:'done', label:'已完成', sub:'点右上进度可一键清理', icon:IC.check, tone:'mut' },
+  { k:'today', label:'今天', sub:'', icon:IC.sun, tone:'' },
+  { k:'scheduled', label:'已排期', sub:'', icon:IC.cal, tone:'mut' },
+  { k:'inbox', label:'收件箱', sub:'', icon:IC.inbox, tone:'mut' },
+  { k:'done', label:'已完成', sub:'', icon:IC.check, tone:'mut' },
 ];
 
 const WEEK_EVENTS = [
@@ -1895,19 +1923,18 @@ function renderTasks() {
   const list = $('#taskList');
   list.innerHTML = GROUPS.map(g => {
     const items = TASKS.filter(t => t.group === g.k && taskMatches(t));
+    if (items.length === 0 && g.k !== 'today') return '';
     return `
-    <section class="tgroup">
-      <div class="gcard ${state.collapsed[g.k] ? 'collapsed' : ''}">
-        <div class="ghead" data-act="group-toggle" data-k="${g.k}">
-          <span class="gi ${g.tone}">${g.icon}</span>
-          <span style="min-width:0"><span class="gt">${g.label}</span><span class="gs">${g.sub}</span></span>
-          <span class="gn mono">${items.length} 项</span>
-          <svg class="gchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-        </div>
-        <div class="gbody">${items.length
-          ? items.map((t, i) => taskRowHTML(t) + (i < items.length - 1 ? '<div class="gsep"></div>' : '')).join('')
-          : `<div class="gempty">${g.k === 'done' ? '完成的任务会归到这里。<br>点右上进度可以一键清理。' : '这一组暂时是空的。<br>用上方输入框记一件事…'}</div>`}</div>
+    <section class="lgroup ${state.collapsed[g.k] ? 'collapsed' : ''}">
+      <div class="lhead" data-act="group-toggle" data-k="${g.k}">
+        <span class="lt">${g.label}</span>
+        <span class="ln mono">${items.length}</span>
+        <span class="sp"></span>
+        <svg class="lchev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
       </div>
+      <div class="lbody">${items.length
+        ? items.map(t => taskRowHTML(t)).join('')
+        : '<div class="lempty">今天还没有安排 · 用上方输入框记一件</div>'}</div>
     </section>`;
   }).join('');
   // 看板
@@ -1933,21 +1960,21 @@ function renderTasks() {
 function taskRowHTML(t) {
   const subDone = t.sub.filter(s => s.done).length;
   return `
-  <div class="trow ${t.done ? 'done' : ''} ${state.selTask === t.id ? 'sel' : ''}" data-task="${t.id}">
+  <div class="trow ${t.done ? 'done' : ''} ${state.selTask === t.id ? 'sel' : ''} ${t.pri === '高' ? 'high' : ''}" data-task="${t.id}">
     <button class="check ${t.done ? 'on' : ''}" data-act="toggle" data-id="${t.id}" aria-label="完成">
       <svg class="ic" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
     </button>
     <div class="tbody">
-      <div class="tt"><span class="pri" style="background:var(${PRI_VAR[t.pri]})"></span><span class="tx">${esc(t.title)}</span></div>
+      <div class="tt"><span class="tx">${esc(t.title)}</span></div>
       <div class="tmeta">
-        <span class="mchip mono time ${/截止/.test(t.when) ? 'due' : ''}">${IC.clock}${esc(t.when)}</span>
-        ${t.sub.length ? `<span class="mchip sub">${subDone}/${t.sub.length} 子待办</span>` : ''}
-        ${t.tags.length ? `<span class="mchip tag">#${t.tags.join(' #')}</span>` : ''}
-        <span class="devbadge ${t.dev === '仅本机' ? 'me' : ''}">${t.dev}</span>
-        ${t.sync ? '<span class="syncdot" title="待同步"></span>' : ''}
+        ${t.sub.length ? `<span class="tmi mono">${subDone}/${t.sub.length}</span>` : ''}
+        ${t.tags.length ? `<span class="tmi ttag">#${t.tags.join(' #')}</span>` : ''}
+        ${t.dev !== '公司-Mac' ? `<span class="tmi tdev">${t.dev}</span>` : ''}
+        ${t.conflict && !t.conflictResolved ? '<span class="tmi twarn">冲突</span>' : ''}
       </div>
     </div>
-    <svg class="rowgo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 6l6 6-6 6"/></svg>
+    <span class="twhen mono ${/截止|逾期/.test(t.when) ? 'due' : ''}">${esc(t.when)}</span>
+    ${t.sync ? '<span class="syncdot" title="待同步"></span>' : ''}
   </div>
   ${t.conflict ? conflictCardHTML(t) : ''}`;
 }
