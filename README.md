@@ -78,6 +78,14 @@ moss-ai-app/
 | **assets3d 符号链接** | `tools/moss-render/assets3d` 指向 `dsh-pet-liang/assets3d` 的**绝对路径**链接，换机器/移动目录需重建 |
 | **跨仓工具** | dsh-link-suite 的 `npm run shots:app` 会来本工程取 `dist/build/h5`，两工程需同级放在工作区根 |
 
+## 设计文档（升级为多设备个人工作台）
+
+| 文档 | 内容 |
+|---|---|
+| [docs/03-产品设计.md](docs/03-产品设计.md) | 定位、信息架构（5 Tab + 设备切换器）、五模块移动裁剪、同步/离线语义、分期 |
+| [docs/02-技术架构.md](docs/02-技术架构.md) | 四层架构、SyncEngine 同步时序、wb.* 协议方法组、与 dsh-link 的区别、工作台改造清单 |
+| [docs/01-可行性分析.md](docs/01-可行性分析.md) | 需求判定、风险矩阵 R1–R10、12.5 人周估算、退出点与降级路线 |
+
 ## 历史
 
 - 2026-10-24：从 `dsh-link-suite/app/` 独立为 `moss-ai-app/`，内嵌协议包、修正 moss-render 路径、更新两侧文档。
