@@ -1,6 +1,60 @@
 {
   "pages": [
     {
+      "path": "pages/today/today",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
+      "path": "pages/calendar/calendar",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
+      "path": "pages/notes/notes",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
+      "path": "pages/focus/focus",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
+      "path": "pages/news/news",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
+      "path": "pages/mine/mine",
+      "style": {
+        "navigationStyle": "custom",
+        "backgroundColor": "#f2f7f4",
+        "backgroundColorTop": "#f2f7f4",
+        "backgroundColorBottom": "#f2f7f4"
+      }
+    },
+    {
       "path": "pages/index/index",
       "style": {
         "navigationStyle": "custom",

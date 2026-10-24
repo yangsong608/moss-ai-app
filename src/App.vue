@@ -77,7 +77,9 @@ onLaunch(() => {
 
     // 跟随系统深浅色——但只在用户没手动选过的时候。
     // 否则设置里辛苦选的浅色，下次冷启动会被系统设置悄悄改掉。
-    if (!prefs.lightStored) state.light = info.osTheme === 'light'
+    // 取不到系统主题时按「浅色」兜底：工作台五屏是高保真稿定稿的浅色卡片观感，
+    // 深色由用户手动切换（不再因为 headless/老 WebView 不报主题就落到深色）。
+    if (!prefs.lightStored) state.light = info.osTheme !== 'dark'
 
     // 低端机降级：关噪点与呼吸动画。阈值取 benchmarkLevel < 20，
     // 覆盖到骁龙 6 系以下；这是"能跑"与"好跑"的分界线（docs/05 §6）。

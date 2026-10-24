@@ -84,7 +84,7 @@ interface AppState {
 
 export const state = reactive<AppState>({
   skinMode: 'auto',
-  light: false,
+  light: true,
   lite: false,
   devices: [],
   sessions: [],
