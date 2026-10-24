@@ -788,7 +788,6 @@ function doClear(): void {
               :key="t.id"
               class="flipcard"
               :class="[{ done: t.done }, ...taskFeedbackClass(t, index, t.done)]"
-              @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
               <view class="fc-top">
@@ -869,6 +868,22 @@ function doClear(): void {
             <text class="calfoot-d">{{ isViewToday ? '只有未完成 · 已完成在日历' : '含已完成' }}</text>
           </view>
           <view class="calfold" />
+        </view>
+
+        <!-- 完成彩蛋：纸屑从卡片中心爆开 -->
+        <view v-if="burst" class="burst">
+          <view
+            v-for="(p, i) in particles"
+            :key="i"
+            class="pt"
+            :style="{
+              '--dx': `${p.dx}px`,
+              '--dy': `${p.dy}px`,
+              '--rot': `${p.rot}deg`,
+              '--delay': `${p.delay}ms`,
+              background: p.color,
+            }"
+          />
         </view>
       </view>
 
@@ -2218,6 +2233,7 @@ function doClear(): void {
   padding: 3px 9px; border-radius: 999px;
   background: var(--acc-soft); color: var(--acc); font-size: 9.5px;
 }
+.calwrap { position: relative; }
 .cardlist { display: flex; flex-direction: column; gap: 10px; padding: 2px 14px 12px; }
 .flipcard.done { opacity: 0.72; }
 .flipcard.done .fc-title { color: var(--st-done); text-decoration: line-through; text-decoration-thickness: 1px; }
