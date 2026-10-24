@@ -1034,6 +1034,45 @@ body{
 .monthgrid{background:var(--card);border:1px solid var(--card-line);border-radius:18px;box-shadow:var(--sh);padding:12px}
 .agenda-main{margin-top:16px}
 .agenda-main .card{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:16px}
+
+/* ═══════════ 清单：加大行间距（用户反馈） ═══════════ */
+.lgroup{margin-top:22px}
+.lhead{padding:2px 4px 11px}
+.lbody{padding:6px 8px}
+.lbody .trow{padding:17px 12px}
+.lbody .trow .tt{line-height:1.5}
+.lbody .trow .tmeta{margin-top:5px}
+/* ═══════════ 专注：白卡体系 ═══════════ */
+.ringwrap{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:50%;
+  padding:14px;box-sizing:border-box}
+.ringwrap .track{stroke:var(--card-track)}
+.ringwrap .run{filter:none}
+.preset{height:34px;background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);color:var(--t2)}
+.preset.on{background:var(--acc);color:var(--acc-ink);border-color:transparent;
+  box-shadow:0 6px 16px color-mix(in srgb,var(--acc) 30%,transparent)}
+.focus-task{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:16px;margin-top:18px}
+.focus-task .fn{font-size:14px}
+.qitem{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:14px;margin-bottom:9px}
+.qitem:hover{transform:none;border-color:color-mix(in srgb,var(--acc) 26%,transparent)}
+.statbox{background:var(--card);border:1px solid var(--card-line);box-shadow:var(--sh);border-radius:14px}
+.statbox .sv{color:var(--t1)}
+/* ═══════════ 资讯：白卡栅格 ═══════════ */
+.newsgrid{column-gap:14px}
+.ncard{margin:0 0 14px;padding:16px;background:var(--card);border:1px solid var(--card-line);
+  box-shadow:var(--sh);border-radius:16px}
+.ncard:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--acc) 26%,transparent)}
+.ncard .nt{font-size:14.5px;font-weight:620;margin:9px 0 7px}
+.ncard .nsum{font-size:12.5px;line-height:1.85}
+.ncard .nmeta{margin-top:11px}
+.chips .chip{background:var(--card);border:1px solid var(--card-line)}
+
+/* 清单行距再加一档（用户反馈：内容卡片间隔不够） */
+.lgroup{margin-top:26px}
+.lbody{padding:8px 10px}
+.lbody .trow{padding:20px 12px;min-height:64px}
+.lbody .trow + .trow{margin-top:2px}
+.lbody .trow .tt{line-height:1.55}
+.lbody .trow .tmeta{margin-top:6px}
 </style>
 </head>
 <body class="dsh" data-skin="moss" data-light="1">
