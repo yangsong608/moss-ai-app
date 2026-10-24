@@ -9,6 +9,7 @@
 
 import { computed, reactive } from 'vue'
 import { state as appState } from './store'
+import { markDirty } from './sync-queue'
 
 /* ─────────── 类型 ─────────── */
 
@@ -294,6 +295,7 @@ export function addTask(title: string, opts: Partial<Task> = {}): Task {
     createdAt: now, updatedAt: now, ...opts,
   }
   mutate((d) => { d.tasks.unshift(task) })
+  markDirty(work.deviceId, 'tasks', task.id, 'upsert')
   return task
 }
 
@@ -306,6 +308,7 @@ export function toggleTask(id: string): void {
     t.sync = true
     if (t.done) t.sub.forEach((s) => { s.done = true })
   })
+  markDirty(work.deviceId, 'tasks', id, 'upsert')
 }
 
 export function updateTask(id: string, patch: Partial<Task>): void {
@@ -314,6 +317,7 @@ export function updateTask(id: string, patch: Partial<Task>): void {
     if (t === undefined) return
     Object.assign(t, patch, { updatedAt: Date.now(), sync: true })
   })
+  markDirty(work.deviceId, 'tasks', id, 'upsert')
 }
 
 export function toggleSub(taskId: string, subId: string): void {
@@ -324,27 +328,34 @@ export function toggleSub(taskId: string, subId: string): void {
     s.done = !s.done
     t!.updatedAt = Date.now()
   })
+  markDirty(work.deviceId, 'tasks', taskId, 'upsert')
 }
 
 export function clearDone(): number {
   let n = 0
+  const removed: string[] = []
   mutate((d) => {
     const keep = d.tasks.filter((t) => !t.done)
     n = d.tasks.length - keep.length
+    removed.push(...d.tasks.filter((t) => t.done).map((t) => t.id))
     d.tasks = keep
   })
+  removed.forEach((id) => markDirty(work.deviceId, 'tasks', id, 'delete'))
   return n
 }
 
 export function addFocus(taskId: string, minutes: number, completed: boolean): void {
+  const id = uid()
   mutate((d) => {
-    d.focus.push({ id: uid(), taskId, minutes, completed, startedAt: Date.now() })
+    d.focus.push({ id, taskId, minutes, completed, startedAt: Date.now() })
   })
+  markDirty(work.deviceId, 'focus_sessions', id, 'upsert')
 }
 
 export function addNote(notebook: string): Note {
   const note: Note = { id: uid(), notebook, title: '未命名笔记', content: '', tags: [], fav: false, updatedAt: Date.now() }
   mutate((d) => { d.notes.unshift(note) })
+  markDirty(work.deviceId, 'notes', note.id, 'upsert')
   return note
 }
 
@@ -354,10 +365,12 @@ export function updateNote(id: string, patch: Partial<Note>): void {
     if (n === undefined) return
     Object.assign(n, patch, { updatedAt: Date.now() })
   })
+  markDirty(work.deviceId, 'notes', id, 'upsert')
 }
 
 export function removeNote(id: string): void {
   mutate((d) => { d.notes = d.notes.filter((n) => n.id !== id) })
+  markDirty(work.deviceId, 'notes', id, 'delete')
 }
 
 export function deviceName(id = work.deviceId): string {

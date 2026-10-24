@@ -6,6 +6,7 @@
  * 皮肤与明暗是全局的，改完 WorkShell 的根 class 立刻变，
  * 同时用 markUserPreference 落盘，冷启动不会被系统主题改回去。
  */
+import { pendingCount, lastSyncAt } from '@/core/sync-queue'
 import { computed } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
 import { deviceName, domainStats, switchDevice, useWork, work, workDevices } from '@/core/workbench'
@@ -21,7 +22,13 @@ const currentDevice = computed(() => workDevices.value.find((d) => d.id === work
 /** state 里可能是 auto：按当前实际生效的皮肤高亮，避免两个选项都不亮 */
 const activeSkin = computed<'moss' | '550w'>(() => (state.skinMode === '550w' ? '550w' : 'moss'))
 const stats = computed(() => domainStats(data.value))
-const pending = computed(() => data.value.tasks.filter((t) => t.sync).length)
+const pending = computed(() => pendingCount(work.deviceId))
+const lastSyncText = computed(() => {
+  const at = lastSyncAt(work.deviceId)
+  if (at === 0) return '尚未同步'
+  const mins = Math.max(0, Math.round((Date.now() - at) / 60000))
+  return mins < 1 ? '刚刚' : `${mins} 分钟前`
+})
 const conflicts = computed(() => data.value.tasks.filter((t) => t.conflict).length)
 const recordCount = computed(
   () => data.value.tasks.length + data.value.notes.length + data.value.focus.length + data.value.news.length,
@@ -134,7 +141,7 @@ function placeholder(text: string): void {
           </view>
           <text class="sync-d">
             待推 <text class="sync-n mono">{{ pending }}</text> 条 · 冲突
-            <text class="sync-n mono">{{ conflicts }}</text> 条 · 上次同步 2 分钟前
+            <text class="sync-n mono">{{ conflicts }}</text> 条 · {{ lastSyncText }}
           </text>
         </view>
         <text class="chev">›</text>
