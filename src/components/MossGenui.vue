@@ -36,6 +36,26 @@ const stepList = (n: GenuiNode): string[] => {
 function maxOf(points: readonly { value: number }[]): number {
   return points.reduce((m, p) => Math.max(m, Math.abs(p.value)), 0) || 1
 }
+
+/** progress：0-100，传 0-1 小数也认 */
+function progressPct(n: GenuiNode): number {
+  const v = num(n, 'value') ?? 0
+  const pct = v <= 1 ? v * 100 : v
+  return Math.max(0, Math.min(100, Math.round(pct)))
+}
+
+const ARROW_MARK: Record<string, string> = { down: '↓', up: '↑', left: '←', right: '→' }
+function arrowMark(dir: string): string {
+  return ARROW_MARK[dir] ?? '↓'
+}
+
+function openLink(url: string): void {
+  if (url.length > 0) uni.setClipboardData({ data: url })
+}
+
+function copyText(text: string): void {
+  if (text.length > 0) uni.setClipboardData({ data: text })
+}
 </script>
 
 <template>
@@ -125,6 +145,26 @@ function maxOf(points: readonly { value: number }[]): number {
       <view v-else-if="node.type === 'json'" class="g-code">
         <text class="g-code-t mono">{{ str(node, 'content') || JSON.stringify(node['value'] ?? node['data']) }}</text>
       </view>
+
+      <!-- 0.14.0 新增的轻量节点：最小实现，重点是内容不丢 -->
+      <view v-else-if="node.type === 'progress'" class="g-progress">
+        <view class="g-progress-track">
+          <view class="g-progress-bar" :style="{ width: progressPct(node) + '%' }" />
+        </view>
+        <text class="g-progress-t">{{ progressPct(node) }}%</text>
+      </view>
+
+      <text v-else-if="node.type === 'arrow'" class="g-arrow">{{ arrowMark(str(node, 'dir')) }}</text>
+
+      <view v-else-if="node.type === 'icon'" class="g-icon">
+        <text class="g-icon-dot">·</text>
+      </view>
+
+      <text v-else-if="node.type === 'link'" class="g-link" @click="openLink(str(node, 'url') || str(node, 'href'))">{{ str(node, 'content') || str(node, 'label') || str(node, 'url') }}</text>
+
+      <view v-else-if="node.type === 'copy'" class="g-copy" @click="copyText(str(node, 'content') || str(node, 'value'))">
+        <text class="g-copy-t">{{ str(node, 'label') || '复制' }}</text>
+      </view>
     </template>
 
     <view v-if="parsed.skipped > 0" class="g-skip">
@@ -145,6 +185,22 @@ function maxOf(points: readonly { value: number }[]): number {
 }
 
 .raw-text { font-size: 11px; color: var(--t3); white-space: pre-wrap; }
+
+.g-progress { display: flex; align-items: center; gap: 8px; }
+.g-progress-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bd); overflow: hidden; }
+.g-progress-bar { height: 6px; border-radius: 3px; background: var(--acc); }
+.g-progress-t { font-size: 10px; color: var(--t3); }
+.g-arrow { font-size: 15px; color: var(--t2); text-align: center; }
+.g-icon { height: 8px; justify-content: center; }
+.g-icon-dot { color: var(--t3); font-size: 13px; text-align: center; }
+.g-link { font-size: 12.5px; color: var(--acc); text-decoration: underline; }
+.g-copy {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+}
+.g-copy-t { font-size: 11px; color: var(--t2); }
 
 .g-title { font-size: 13px; font-weight: 600; color: var(--t1); }
 .g-text { font-size: 13px; line-height: 20px; color: var(--t1); }

@@ -116,6 +116,14 @@ const FENCE = /^\s*```(.*)$/
 /** 表格分隔行，如 | --- | :--: | */
 const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 
+/**
+ * 规范化围栏语言标记：去空白与尾部标点（中英文句读都算），转小写。
+ * 对齐 dsh-genui 的 `normalizeFenceLanguage` 行为，避免 `dsh-ui。` 这类写法掉出 genui 渲染。
+ */
+function normalizeFenceLang(lang: string): string {
+  return lang.trim().replace(/[。．.，,、：:；;！!？?\s]+$/u, '').toLowerCase()
+}
+
 /** 把 | a | b | 拆成单元格 */
 function splitRow(line: string): string[] {
   const t = line.trim().replace(/^\|/, '').replace(/\|$/, '')
@@ -144,8 +152,10 @@ export function parseMarkdown(src: string): Block[] {
       // 跳过收尾的 ```
       if (i < lines.length) i += 1
       const text = body.join('\n')
-      // dsh-ui：结构化 UI 规格，交给渲染层做降级说明，不按普通代码块处理
-      if (lang.toLowerCase() === 'dsh-ui') {
+      // dsh-ui：结构化 UI 规格，交给渲染层做降级说明，不按普通代码块处理。
+      // 语言标记按 dsh-genui 的 normalizeFenceLanguage 语义规范化：
+      // 允许大小写差异与尾部标点（模型常写成 ```dsh-ui。），否则整块会被误当代码块。
+      if (normalizeFenceLang(lang) === 'dsh-ui') {
         blocks.push({ t: 'genui', raw: text })
       } else {
         blocks.push({ t: 'code', lang, text })

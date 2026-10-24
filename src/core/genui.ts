@@ -38,10 +38,59 @@ export const SUPPORTED = new Set([
   'chart',
   // 选项式提问：点选后由客户端把选择作为一条消息发回
   'choice',
+  // 0.14.0 起常见，手机端给最小实现（不解嵌套布局，只保证内容不丢）
+  'progress',
+  'arrow',
+  'icon',
+  'link',
+  'copy',
 ])
+
+/**
+ * 布局容器：手机端单列渲染，不做并排/网格，但**子节点必须保住**
+ * （0.14.0 后模型大量用 row/col/card 包内容，直接整条丢弃等于整块空白）。
+ */
+export const CONTAINERS = new Set(['row', 'col', 'grid', 'card', 'hero'])
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * 缺 `type` 的节点按字段推断（对齐 dsh-genui 0.14.0「推断缺少类型的合法组件节点」）。
+ * 推断不出来返回 undefined → 计入 skipped。
+ */
+function inferType(node: Record<string, unknown>): string | undefined {
+  if (typeof node['content'] === 'string') return 'text'
+  if (typeof node['text'] === 'string') return 'text'
+  if (Array.isArray(node['steps'])) return 'steps'
+  if (Array.isArray(node['pairs'])) return 'keyvalue'
+  if (Array.isArray(node['columns']) && Array.isArray(node['rows'])) return 'table'
+  if (Array.isArray(node['options'])) return 'choice'
+  if (Array.isArray(node['items'])) return 'row' // 按容器处理，走展平
+  return undefined
+}
+
+/**
+ * 把节点列表展平成单列：容器换行展开（row/col/grid/card/hero），
+ * 叶子节点按白名单保留；递归上限防病态嵌套。
+ */
+function flatten(src: readonly unknown[], depth: number, kept: GenuiNode[], skipped: { n: number }): void {
+  if (depth > 6) { skipped.n += src.length; return }
+  for (const raw of src) {
+    if (!isRecord(raw)) { skipped.n += 1; continue }
+    const typed = typeof raw['type'] === 'string' ? raw['type'] : inferType(raw)
+    if (typed === undefined) { skipped.n += 1; continue }
+    const node = raw as GenuiNode
+    if (CONTAINERS.has(typed)) {
+      flatten(arr(node, 'items'), depth + 1, kept, skipped)
+      continue
+    }
+    if (!SUPPORTED.has(typed)) { skipped.n += 1; continue }
+    // 推断出来的类型补进节点，渲染层不必再判空
+    if (typeof raw['type'] !== 'string') { kept.push({ ...node, type: typed }); continue }
+    kept.push(node)
+  }
+}
 
 /**
  * 解析一段 dsh-ui 的 JSON 文本。
@@ -61,13 +110,8 @@ export function parseGenui(raw: string): { spec: GenuiSpec; skipped: number } | 
   if (items.length === 0) return undefined
 
   const kept: GenuiNode[] = []
-  let skipped = 0
-  for (const raw of items) {
-    if (!isRecord(raw) || typeof raw['type'] !== 'string') { skipped += 1; continue }
-    const node = raw as GenuiNode
-    if (!SUPPORTED.has(node.type)) { skipped += 1; continue }
-    kept.push(node)
-  }
+  const skipped = { n: 0 }
+  flatten(items, 0, kept, skipped)
 
   return {
     spec: {
@@ -75,7 +119,7 @@ export function parseGenui(raw: string): { spec: GenuiSpec; skipped: number } | 
       ...(typeof data['gap'] === 'number' ? { gap: data['gap'] } : {}),
       items: kept,
     },
-    skipped,
+    skipped: skipped.n,
   }
 }
 
