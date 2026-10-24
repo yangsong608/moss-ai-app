@@ -36,8 +36,57 @@ import {
   type TaskStatus,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { state } from '@/core/store'
 
 const { data } = useWork()
+
+/* 先播放短暂的本地反馈，再调用原有数据动作；集合变化不影响任务数据源。 */
+const enteringIds = ref<Set<string>>(new Set())
+const completingIds = ref<Set<string>>(new Set())
+const leavingIds = ref<Set<string>>(new Set())
+const feedbackTimers = new Set<ReturnType<typeof setTimeout>>()
+
+function markFeedback(target: typeof enteringIds, id: string): void {
+  const next = new Set(target.value)
+  next.add(id)
+  target.value = next
+}
+
+function afterFeedback(callback: () => void, ms: number): void {
+  if (stateLiteOrReduced()) {
+    callback()
+    return
+  }
+  const timer = setTimeout(() => {
+    feedbackTimers.delete(timer)
+    callback()
+  }, ms)
+  feedbackTimers.add(timer)
+}
+
+function stateLiteOrReduced(): boolean {
+  if (typeof window === 'undefined') return false
+  return state.lite || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+function staggerClass(index: number): string {
+  return index < 8 ? `fb-stagger fb-i-${index}` : ''
+}
+
+function taskFeedbackClass(t: Task, index: number, doneGroup = false): (string | Record<string, boolean>)[] {
+  return [
+    !doneGroup && !t.done && !enteringIds.value.has(t.id) ? staggerClass(index) : '',
+    {
+      'fb-enter': enteringIds.value.has(t.id),
+      'fb-exit': leavingIds.value.has(t.id) || completingIds.value.has(t.id),
+    },
+  ]
+}
+
+onUnmounted(() => {
+  feedbackTimers.forEach((timer) => clearTimeout(timer))
+  feedbackTimers.clear()
+})
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
@@ -179,7 +228,8 @@ function addQuick(e?: any): void {
   }
   // 目标设备不是当前域时先切域，任务才会落进那台设备的数据里
   if (quickDev.value !== work.deviceId) switchDevice(quickDev.value)
-  addTask(title, { date: todayIso.value, when: '今天', dev: deviceName() })
+  const task = addTask(title, { date: todayIso.value, when: '今天', dev: deviceName() })
+  markFeedback(enteringIds, task.id)
   quick.value = ''
   quickKey.value += 1
   haptic('light')
@@ -391,10 +441,23 @@ function openTask(id: string): void {
 }
 
 function toggle(id: string): void {
-  toggleTask(id)
+  const task = data.value.tasks.find((x) => x.id === id)
+  if (task === undefined || completingIds.value.has(id) || leavingIds.value.has(id)) return
   haptic('medium')
-  const t = data.value.tasks.find((x) => x.id === id)
-  toast(t?.done === true ? '已完成 · 待同步到 DSH' : '已恢复为未完成')
+  if (task.done || taskView.value === 'board') {
+    toggleTask(id)
+    toast(task.done ? '已恢复为未完成' : '已完成 · 待同步到 DSH')
+    return
+  }
+  // 普通清单先显示打勾，再让行淡出；已完成组只切换静态状态，不播退出。
+  markFeedback(completingIds, id)
+  afterFeedback(() => {
+    toggleTask(id)
+    const next = new Set(completingIds.value)
+    next.delete(id)
+    completingIds.value = next
+    toast('已完成 · 待同步到 DSH')
+  }, 280)
 }
 
 function subText(t: Task): string {
@@ -449,11 +512,17 @@ function cancelDelete(): void {
 function confirmDelete(): void {
   const t = deleteTarget.value
   if (t === null) return
-  removeTask(t.id)
   deleteTarget.value = null
   if (detailOpen.value && detailId.value === t.id) detailOpen.value = false
+  markFeedback(leavingIds, t.id)
   haptic('heavy')
-  toast('已删除任务 · 待同步到其他端')
+  afterFeedback(() => {
+    removeTask(t.id)
+    const next = new Set(leavingIds.value)
+    next.delete(t.id)
+    leavingIds.value = next
+    toast('已删除任务 · 待同步到其他端')
+  }, 120)
 }
 
 /* ── 历史动作：恢复 / 日历 ─────────────────────────────────────────── */
@@ -566,7 +635,7 @@ function doClear(): void {
           <view class="qdev" @tap="cycleQuickDev">
             <text class="qdev-t">{{ quickDevName }}</text>
           </view>
-          <view class="qadd" @tap="addQuick"><text class="qadd-g">＋</text></view>
+          <view class="qadd fb-press" :class="{ 'fb-disabled': quick.trim() === '' }" :aria-disabled="quick.trim() === ''" @tap="addQuick"><text class="qadd-g">＋</text></view>
         </view>
         <view class="quickhint">
           <text class="mono">回车连建 · 不打断输入</text>
@@ -588,7 +657,7 @@ function doClear(): void {
       </view>
 
       <!-- 清单 -->
-      <view v-if="taskView === 'list'" class="groups">
+      <view v-if="taskView === 'list'" :key="`list-${filterMode}`" class="groups">
         <view v-for="g in visibleGroups" :key="g.key" class="group">
           <view class="ghead" @tap="toggleGroup(g.key)">
             <view class="gi" :class="{ mut: g.key === 'done', warn: g.key === 'scheduled' }">
@@ -602,16 +671,16 @@ function doClear(): void {
 
           <view v-if="!collapsed[g.key]" class="gbody">
             <view
-              v-for="t in g.items"
+              v-for="(t, index) in g.items"
               :key="t.id"
               class="trow"
-              :class="{ done: t.done, cur: detailOpen && detailId === t.id }"
+              :class="[{ done: t.done || completingIds.has(t.id), cur: detailOpen && detailId === t.id }, ...taskFeedbackClass(t, index, g.key === 'done')]"
               @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
               <view class="tbar" :style="statusStyle(t)" />
-              <view class="check" :class="{ on: t.done }" @tap.stop="toggle(t.id)">
-                <text class="cg">✓</text>
+              <view class="check" :class="{ on: t.done || completingIds.has(t.id) }" @tap.stop="toggle(t.id)">
+                <text class="cg"><text class="cg-line" /><text class="cg-line" /></text>
               </view>
               <view class="tbody">
                 <text class="tt">{{ t.title }}</text>
@@ -633,13 +702,16 @@ function doClear(): void {
                 </view>
               </view>
             </view>
-            <view v-if="g.items.length === 0" class="gempty">{{ g.hint }}</view>
+            <view v-if="g.items.length === 0" class="gempty fb-empty">
+              <text class="fb-empty-icon">✓</text>
+              <text>{{ g.hint }}</text>
+            </view>
           </view>
         </view>
       </view>
 
       <!-- 看板 -->
-      <scroll-view v-else-if="taskView === 'board'" scroll-x class="board-scroll" :show-scrollbar="false">
+      <scroll-view v-else-if="taskView === 'board'" :key="`board-${filterMode}`" scroll-x class="board-scroll" :show-scrollbar="false">
         <view class="board">
           <view v-for="col in board" :key="col.key" class="bcol">
             <view class="bh">
@@ -648,10 +720,10 @@ function doClear(): void {
               <text class="mono bn">{{ col.items.length }}</text>
             </view>
             <view
-              v-for="t in col.items"
+              v-for="(t, index) in col.items"
               :key="t.id"
               class="bcard"
-              :class="[t.pri, statusKeyOf(t)]"
+              :class="[t.pri, statusKeyOf(t), ...taskFeedbackClass(t, index)]"
               @tap="openTask(t.id)"
               @longpress="openRowMenu(t)"
             >
@@ -662,7 +734,7 @@ function doClear(): void {
                 <view v-if="t.sync" class="syncdot" />
               </view>
             </view>
-            <view v-if="col.items.length === 0" class="bcol-empty">这一列暂时是空的</view>
+            <view v-if="col.items.length === 0" class="bcol-empty fb-empty"><text class="fb-empty-icon">＋</text><text>从快速记录新建任务，再在这里推进状态</text></view>
           </view>
         </view>
       </scroll-view>
@@ -683,7 +755,7 @@ function doClear(): void {
               <view class="sp" />
             </view>
             <view class="gbody">
-              <view v-for="t in g.items" :key="t.id" class="hrow" @tap="openTask(t.id)">
+              <view v-for="(t, index) in g.items" :key="t.id" class="hrow" :class="taskFeedbackClass(t, index, true)" @tap="openTask(t.id)">
                 <view class="hbody">
                   <text class="ht">{{ t.title }}</text>
                   <view class="hmeta">
@@ -698,15 +770,18 @@ function doClear(): void {
                   <view class="hact del" @tap.stop="askDelete(t)"><text>删除</text></view>
                 </view>
               </view>
-              <view v-if="g.items.length === 0" class="gempty">{{ g.hint }}</view>
+              <view v-if="g.items.length === 0" class="gempty fb-empty">
+              <text class="fb-empty-icon">✓</text>
+              <text>{{ g.hint }}</text>
+            </view>
             </view>
           </view>
         </template>
 
         <view v-else class="history-empty">
-          <text class="he-g">◷</text>
+          <text class="he-g fb-empty-icon">◷</text>
           <text class="he-t">还没有完成记录</text>
-          <text class="he-d">完成的任务会出现在这里，可恢复为未完成或按日期去日历回看。</text>
+          <text class="he-d">切回清单勾选一项任务，完成记录会出现在这里。</text>
         </view>
       </view>
     </view>
@@ -1208,7 +1283,8 @@ function doClear(): void {
   transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
 }
 
-.check:active { transform: scale(0.9); }
+.check { transition: transform 90ms ease-out; }
+.check:active { transform: scale(0.97); }
 
 .check.on {
   background: var(--st-done);
@@ -1216,7 +1292,29 @@ function doClear(): void {
   color: var(--acc-ink);
 }
 
-.cg { font-size: 12px; line-height: 1; }
+.check.on { animation: check-pop 280ms var(--ease-out); }
+@keyframes check-pop {
+  0% { transform: scale(0.78); }
+  65% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.cg { position: relative; display: block; width: 11px; height: 9px; }
+.cg-line {
+  position: absolute;
+  height: 1.6px;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: left center;
+}
+.cg-line:first-child { width: 5px; left: 0; top: 4px; transform: rotate(45deg) scaleX(0); }
+.cg-line:last-child { width: 9px; left: 4px; top: 7px; transform: rotate(-48deg) scaleX(0); }
+.check.on .cg-line:first-child { animation: check-short 100ms ease-out 70ms forwards; }
+.check.on .cg-line:last-child { animation: check-long 150ms ease-out 150ms forwards; }
+@keyframes check-short { to { transform: rotate(45deg) scaleX(1); } }
+@keyframes check-long { to { transform: rotate(-48deg) scaleX(1); } }
+/* 已完成组恢复静态对勾，不因刷新或切换视图反复播描线。 */
+.trow.done:not(.fb-exit) .cg-line:first-child { transform: rotate(45deg) scaleX(1); animation: none; }
+.trow.done:not(.fb-exit) .cg-line:last-child { transform: rotate(-48deg) scaleX(1); animation: none; }
 
 .tbody { flex: 1; min-width: 0; }
 
@@ -1319,6 +1417,9 @@ function doClear(): void {
 .tmenu-g { font-size: 15px; line-height: 1; letter-spacing: 1px; }
 
 .gempty {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   padding: 14px 10px 16px;
   text-align: center;
   font-size: 10.5px;
@@ -1581,6 +1682,9 @@ function doClear(): void {
 }
 
 .bcol-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   padding: 14px 6px;
   text-align: center;
   font-size: 10px;

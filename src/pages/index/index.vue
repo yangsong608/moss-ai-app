@@ -672,6 +672,10 @@ onLoad(() => {
   <view :class="rootClass">
     <MossVeil />
 
+    <!-- 极光只做静态渐变层的 transform 漂移；装饰层不接收事件。 -->
+    <view class="aurora aurora-a" />
+    <view class="aurora aurora-b" />
+
     <!-- 启动动画：每次冷启动出现一次，任意位置点击可跳过 -->
     <MossBoot v-if="booting" @done="onBootDone" />
 
@@ -692,109 +696,151 @@ onLoad(() => {
     <view class="layout">
       <scroll-view scroll-y class="feed">
         <view class="wrap">
-          <!-- 品牌区：这说明"这是什么"，也说明"现在该干什么" -->
-          <view class="top">
-            <view class="brand">
-              <MossBadge :size="30" :working="anyWorking" :glow="!state.lite" />
-              <view class="brand-txt">
-                <view class="brand-line">
-                  <text class="logo mono">MOSS<text class="logo-acc">AI</text></text>
-                  <view class="app-tag mono">APP</view>
+          <!-- 品牌状态台：品牌、标题、在线读数与连接状态集中在一层。 -->
+          <view class="hero enter">
+            <view class="hero-scan" />
+            <view class="hero-top">
+              <view class="brand">
+                <MossBadge :size="40" :working="anyWorking" :glow="!state.lite" />
+                <view class="brand-txt">
+                  <view class="brand-line">
+                    <text class="logo mono">MOSS</text>
+                    <view class="app-tag mono">CONTROL</view>
+                  </view>
+                  <text class="brand-sub mono">REMOTE DEVICE CONSOLE</text>
                 </view>
-                <text class="tagline">设备与配对 · 连上电脑，任务继续跑</text>
+              </view>
+              <view class="top-actions">
+                <view
+                  class="iconbtn"
+                  :class="{ spin: refreshing }"
+                  role="button"
+                  aria-label="刷新设备"
+                  @tap="refresh"
+                >
+                  <text class="glyph">↻</text>
+                </view>
+                <view
+                  class="iconbtn"
+                  role="button"
+                  :aria-label="state.light ? '切换深色主题' : '切换浅色主题'"
+                  @tap="toggleTheme"
+                >
+                  <text class="glyph">{{ state.light ? '☾' : '☀' }}</text>
+                </view>
               </view>
             </view>
-            <view class="top-actions">
-              <view class="iconbtn" :class="{ spin: refreshing }" @tap="refresh">
-                <text class="glyph">↻</text>
+
+            <view class="hero-main">
+              <view class="hero-copy">
+                <text class="hero-kicker mono">DEVICE &amp; PAIRING</text>
+                <text class="hero-title">设备与配对</text>
+                <text class="hero-desc">连上电脑，任务继续跑</text>
               </view>
-              <view class="iconbtn" @tap="toggleTheme">
-                <text class="glyph">{{ state.light ? '☾' : '☀' }}</text>
+              <view class="online-readout">
+                <text class="online-n mono">{{ String(onlineCount).padStart(2, '0') }}</text>
+                <text class="online-k mono">ONLINE</text>
+                <view class="status-pill" :class="{ idle: onlineCount === 0 }">
+                  <view class="status-pill-dot" />
+                  <text>{{ onlineCount > 0 ? '链路在线' : needAuth.length > 0 ? '等待确认' : '等待连接' }}</text>
+                </view>
               </view>
+            </view>
+
+            <view class="hero-stats">
+              <view class="hero-stat">
+                <text class="hero-stat-v mono">{{ pairedDevices.length }}</text>
+                <text class="hero-stat-k">已配对设备</text>
+              </view>
+              <view class="hero-stat">
+                <text class="hero-stat-v mono" :class="{ warn: needAuth.length > 0 }">{{ needAuth.length }}</text>
+                <text class="hero-stat-k">待确认</text>
+              </view>
+              <view class="hero-stat">
+                <text class="hero-stat-v mono" :class="{ warn: state.waiting > 0 }">{{ state.waiting }}</text>
+                <text class="hero-stat-k">待处理任务</text>
+              </view>
+              <text class="hero-live mono">LIVE / {{ refreshing ? 'SYNC' : 'READY' }}</text>
             </view>
           </view>
 
-          <!-- 一行统计：不占一张卡的位置，但让"有几台在线"一眼可见。
-               没有设备时整行不出现——"0 台在线 · 0 台设备"是零信息量。 -->
-          <view v-if="state.devices.length > 0" class="strip">
-            <view class="strip-i">
-              <view class="strip-dot" />
-              <text class="strip-n mono">{{ onlineCount }}</text>
-              <text>台在线</text>
-            </view>
-            <text class="strip-sep">·</text>
-            <view class="strip-i">
-              <text class="strip-n mono">{{ state.devices.length }}</text>
-              <text>台设备</text>
-            </view>
-            <view v-if="state.waiting > 0" class="strip-warn">
-              <text class="mono">{{ state.waiting }}</text>
-              <text> 项待处理</text>
-            </view>
-          </view>
-
-          <!-- 待确认配对：连得上但还没认证。单独一块，不和已配对设备混排 -->
-          <view v-if="needAuth.length > 0" class="block">
+          <!-- 待确认配对：独立成块，主列表由 pairedDevices 保证不重复。 -->
+          <view v-if="needAuth.length > 0" class="block auth-block">
             <view class="block-head">
-              <text class="block-t">待确认配对</text>
+              <view class="block-heading">
+                <text class="block-t">待确认配对</text>
+                <text class="block-code mono">ACTION REQUIRED</text>
+              </view>
               <text class="block-n mono">{{ needAuth.length }}</text>
             </view>
             <view
-              v-for="d in needAuth"
+              v-for="(d, index) in needAuth"
               :key="`p-${d.deviceId}`"
               class="pairing"
+              :class="{ enter: index < 8 }"
+              :style="index < 8 ? { animationDelay: `${index * 45}ms` } : undefined"
               @tap="openPairFor(d)"
             >
               <view class="pairing-ico"><text class="mono">⌁</text></view>
               <view class="pairing-body">
                 <text class="pairing-t">{{ d.name }}</text>
-                <text class="pairing-d">已找到这台电脑，输入它显示的 6 位码即可确认</text>
+                <text class="pairing-d">已找到电脑，输入它显示的 6 位码完成确认</text>
                 <text v-if="d.endpoint?.url" class="pairing-addr mono">{{ d.endpoint.url }}</text>
               </view>
-              <view class="pairing-btn"><text>输入配对码</text></view>
+              <view class="pairing-btn"><text>去确认</text><text class="pairing-arrow">›</text></view>
             </view>
           </view>
 
           <!-- 设备卡列表 -->
-          <view class="block">
+          <view class="block devices-block">
             <view class="block-head">
-              <text class="block-t">我的电脑</text>
+              <view class="block-heading">
+                <text class="block-t">设备矩阵</text>
+                <text class="block-code mono">PAIRED NODES</text>
+              </view>
               <text class="block-n mono">{{ pairedDevices.length }}</text>
               <text v-if="refreshing" class="block-sync mono">同步中…</text>
             </view>
 
             <view
-              v-for="d in pairedDevices"
+              v-for="(d, index) in pairedDevices"
               :key="d.deviceId"
               class="dev"
               :class="{
+                enter: index < 8,
                 current: isActive(d),
+                'is-online': statusOf(d) === 'online',
                 locked: d.lock?.locked === true,
                 off: statusOf(d) === 'offline',
               }"
+              :style="index < 8 ? { animationDelay: `${index * 45}ms` } : undefined"
               @tap="open(d)"
               @longpress="deviceMenu(d)"
             >
-              <view class="dev-head">
-                <view class="dev-dot"><MossDot :status="statusOf(d)" /></view>
+              <!-- 仅在线设备渲染旋转渐变；mask 只留下 1px 外圈。 -->
+              <view class="dev-rim"><view class="dev-flow" /></view>
+              <view class="dev-head dev-content">
+                <view class="dev-dot">
+                  <view v-if="statusOf(d) === 'online'" class="radar-ring" />
+                  <MossDot :status="statusOf(d)" />
+                </view>
                 <view class="dev-id">
                   <view class="dev-name-row">
                     <text class="dev-name">{{ d.name }}</text>
                     <view v-if="d.lock?.locked" class="pill danger">锁屏</view>
                     <view v-else-if="isActive(d)" class="pill acc">当前</view>
-                    <view v-if="d.conn === 'needs-auth'" class="pill warn">需配对</view>
                   </view>
                   <text class="dev-host mono">{{ hostLine(d) }}</text>
                 </view>
                 <view class="dev-lat">
                   <text class="dev-lat-v mono" :class="latencyTone(d)">{{ latencyText(d) }}</text>
-                  <text class="dev-lat-k">延迟</text>
+                  <text class="dev-lat-k mono">LATENCY</text>
                 </view>
-                <view class="dev-more" @tap.stop="deviceMenu(d)"><text>⋯</text></view>
+                <view class="dev-more" role="button" aria-label="设备管理" @tap.stop="deviceMenu(d)"><text>⋯</text></view>
               </view>
 
-              <!-- 这台设备的数据量：会话 / 运行中 / 待处理 / 本地条目 -->
-              <view class="metrics">
+              <!-- 固定四格；未加载的数据以 — 表示，不把未知误报成 0。 -->
+              <view class="metrics dev-content">
                 <view class="metric">
                   <text class="metric-v mono">{{ totalText(d) }}</text>
                   <text class="metric-k">会话</text>
@@ -807,38 +853,38 @@ onLoad(() => {
                   <text class="metric-v mono">{{ sessionStats(d).waiting }}</text>
                   <text class="metric-k">待处理</text>
                 </view>
-                <view v-if="dataVolume(d) !== undefined" class="metric">
-                  <text class="metric-v mono">{{ dataVolume(d) }}</text>
+                <view class="metric">
+                  <text class="metric-v mono">{{ dataVolume(d) ?? '—' }}</text>
                   <text class="metric-k">本地条目</text>
                 </view>
               </view>
 
-              <!-- 费用与峰谷：宿主没装 dsh-cost-meter 时整行不出现 -->
               <view
                 v-if="d.deviceId === state.activeId && (costText().length > 0 || peakText().length > 0)"
-                class="dev-cost"
+                class="dev-cost dev-content"
               >
                 <text v-if="costText().length > 0" class="cost mono">累计 {{ costText() }}</text>
                 <text v-if="peakText().length > 0" class="peak mono" :class="peakTone()">{{ peakText() }}</text>
               </view>
 
-              <view class="dev-foot">
-                <text class="dev-state" :class="statusOf(d)">{{ statusText(statusOf(d)) }}</text>
+              <view class="dev-foot dev-content">
+                <view class="dev-status">
+                  <view class="dev-status-mark" :class="statusOf(d)" />
+                  <text class="dev-state" :class="statusOf(d)">{{ statusText(statusOf(d)) }}</text>
+                </view>
                 <view v-if="d.lock?.locked" class="dev-unlock" @tap.stop="requestUnlock">
                   <text>请求解锁</text>
                 </view>
                 <view class="grow" />
-                <text class="dev-go">进入工作台 ›</text>
+                <view class="dev-go"><text>进入工作台</text><text class="dev-go-arrow">›</text></view>
               </view>
             </view>
 
-            <!-- 空态：两个真入口，不摆假设备卡，也不显示"0 台在线" -->
-            <view v-if="state.devices.length === 0" class="empty">
-              <text class="empty-t">还没有配对设备</text>
-              <text class="empty-d">
-                在电脑上打开 MOSS Link → 生成配对码，用手机扫码或输入 6 位码。
-                也可以先不连电脑，直接用本地域。
-              </text>
+            <!-- 空态：保留扫码与直接进入本地域两个真入口。 -->
+            <view v-if="state.devices.length === 0" class="empty enter">
+              <view class="empty-signal"><view /><view /><view /></view>
+              <text class="empty-t">等待第一台电脑接入</text>
+              <text class="empty-d">在电脑端 MOSS Link 生成配对码，扫码即可连接；也可以先使用本地域。</text>
               <view class="empty-acts">
                 <view class="empty-btn primary" @tap="addDevice"><text>扫码配对</text></view>
                 <view class="empty-btn ghost" @tap="goLocal"><text>直接进本地域</text></view>
@@ -846,12 +892,18 @@ onLoad(() => {
             </view>
           </view>
 
-          <!-- 本地域入口：不连电脑也能用 -->
-          <view class="local" :class="{ on: isLocal }" @tap="goLocal">
-            <view class="local-ico"><text class="mono">▤</text></view>
+          <!-- 本地域：虚线、存储图标与较低对比材质，和远程主机明确区分。 -->
+          <view
+            class="local enter"
+            :class="{ on: isLocal }"
+            :style="{ animationDelay: `${Math.min(pairedDevices.length, 7) * 45}ms` }"
+            @tap="goLocal"
+          >
+            <view class="local-ico"><view class="local-glyph" /></view>
             <view class="local-body">
               <view class="local-head">
                 <text class="local-t">本地域</text>
+                <text class="local-code mono">ON THIS DEVICE</text>
                 <view v-if="isLocal" class="pill acc">当前</view>
               </view>
               <text class="local-d">不连电脑也能用：任务 / 日历 / 专注 / 笔记（无会话与 AI）</text>
@@ -860,21 +912,23 @@ onLoad(() => {
           </view>
 
           <view class="foot">
+            <view class="foot-lock" />
             <text>数据不经过任何服务器</text>
-            <text class="mono"> / E2E</text>
+            <text class="mono"> / END-TO-END</text>
           </view>
         </view>
       </scroll-view>
 
-      <!-- 主操作：固定在底部，拇指可达；底部避开 home indicator -->
+      <!-- 固定在底部的配对 dock，包含真实底部安全区。 -->
       <view class="dock">
         <view class="dock-inner">
           <view class="cta" @tap="addDevice">
             <text class="cta-plus">＋</text>
             <text class="cta-t">扫码配对</text>
+            <text class="cta-code mono">PAIR</text>
           </view>
           <view class="dock-alt" @tap="addDevice">
-            <text>或输入 6 位配对码</text>
+            <text>或输入 6 位配对码</text><text class="dock-alt-arrow">↗</text>
           </view>
         </view>
       </view>
@@ -910,8 +964,6 @@ onLoad(() => {
           <view class="sheet-x" @tap="closePair"><text>×</text></view>
         </view>
 
-        <!-- 扫码是主路径：一次拿到地址+码，不用手抄 ws:// -->
-        <!-- 图标用纯 CSS 画：App 端对内联 SVG 不稳定，会"图标消失但文字在" -->
         <view class="scan-btn" :class="{ 'is-disabled': pairBusy }" @tap="scanToPair">
           <view class="scan-ico">
             <view class="scan-corner tl" />
@@ -935,7 +987,6 @@ onLoad(() => {
           :disabled="pairBusy"
         />
 
-        <!-- 首次配对时本地还没有 endpoint，必须让用户填一次地址 -->
         <input
           v-if="needsAddress"
           v-model="pairAddress"
@@ -949,7 +1000,6 @@ onLoad(() => {
 
         <view class="sheet-acts">
           <view class="btn ghost" @tap="closePair"><text>取消</text></view>
-          <!-- 忙碌时必须视觉禁用：只改文案用户会反复点，重复配对请求 -->
           <view class="btn primary" :class="{ 'is-disabled': pairBusy }" @tap="finishPair">
             <text>{{ pairBusy ? '配对中…' : '配对' }}</text>
           </view>
@@ -960,537 +1010,609 @@ onLoad(() => {
 </template>
 
 <style lang="scss" scoped>
-/**
- * 这一页是独立全屏，不再套 PageShell：
- * 根节点自己撑满视口 + 顶开状态栏（.dsh 的 padding-top 由 moss.scss 统一给），
- * 内容列分成「可滚动的 feed」与「常驻底部的 dock」两段。
- */
+/* 独立全屏控制台。仅 transform/opacity 参与动画，无 blur/backdrop-filter/canvas。 */
 .idx {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-
-  /* 卡片阴影与遮罩：深色下用近黑、浅色下用强调色的淡淡投影，都从 var() 推导 */
-  --card-shadow: 0 10px 26px color-mix(in srgb, var(--bg-grad-3) 78%, transparent);
+  --r-console: 20px;
+  --glass-top: color-mix(in srgb, var(--s1) 88%, transparent);
+  --glass-bottom: color-mix(in srgb, var(--s1) 76%, transparent);
+  --glass-hi: color-mix(in srgb, var(--t1) 12%, transparent);
+  --card-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 12%, transparent);
   --mask-bg: color-mix(in srgb, var(--bg-grad-3) 80%, transparent);
-  --cta-shadow: 0 14px 30px color-mix(in srgb, var(--acc) 26%, transparent);
+  --cta-shadow: 0 10px 28px color-mix(in srgb, var(--acc) 24%, transparent);
+  transition: background-color 160ms ease-out, color 160ms ease-out;
 }
 
 .idx.is-light {
-  --card-shadow: 0 8px 22px color-mix(in srgb, var(--acc) 10%, transparent);
+  --glass-top: color-mix(in srgb, var(--s1) 82%, transparent);
+  --glass-bottom: color-mix(in srgb, var(--s1) 66%, transparent);
+  --glass-hi: color-mix(in srgb, var(--s1) 90%, transparent);
+  --card-shadow: 0 10px 28px color-mix(in srgb, var(--acc) 10%, transparent);
   --mask-bg: color-mix(in srgb, var(--t1) 42%, transparent);
-  --cta-shadow: 0 12px 26px color-mix(in srgb, var(--acc) 22%, transparent);
+  --cta-shadow: 0 10px 24px color-mix(in srgb, var(--acc) 20%, transparent);
+}
+
+/* 两个静态径向渐变层漂移，渐变本身不参与动画。 */
+.aurora {
+  position: absolute;
+  z-index: 0;
+  width: 118%;
+  height: 56%;
+  left: -9%;
+  pointer-events: none;
+  opacity: 0.75;
+  background:
+    radial-gradient(ellipse at 26% 36%, var(--acc-soft), transparent 58%),
+    radial-gradient(ellipse at 78% 58%, var(--acc-glow), transparent 54%);
+  transform: translate3d(-3%, 0, 0);
+  animation: aurora-drift 24s ease-in-out infinite alternate;
+}
+
+.aurora-a { top: -16%; }
+.aurora-b {
+  top: auto;
+  bottom: -24%;
+  opacity: 0.42;
+  transform: translate3d(3%, 0, 0);
+  animation-direction: alternate-reverse;
+}
+
+.is-light .aurora { opacity: 0.48; }
+.is-light .aurora-b { opacity: 0.24; }
+
+@keyframes aurora-drift {
+  from { transform: translate3d(-3%, -2%, 0); }
+  to { transform: translate3d(3%, 2%, 0); }
 }
 
 .layout {
+  position: relative;
+  z-index: 2;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.feed {
-  flex: 1;
-  min-height: 0;
-}
+.feed { flex: 1; min-height: 0; }
 
 .wrap {
   width: 100%;
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: 0 var(--gutter) 18px;
+  padding: 8px var(--gutter) 20px;
 }
 
-/* ── 品牌区 ─────────────────────────────────────────────────────────── */
-
-.top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0 12px;
+/* ── 品牌 / 状态台 ─────────────────────────────────────────────────── */
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 15px 16px 0;
+  border: 1px solid var(--bd);
+  border-radius: 22px;
+  background:
+    linear-gradient(125deg, var(--glass-hi), transparent 36%),
+    linear-gradient(160deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: var(--card-shadow), inset 0 1px 0 var(--glass-hi);
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
 }
 
-.brand {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.hero::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 51px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--bd-strong), transparent);
+  opacity: 0.65;
+  pointer-events: none;
 }
 
-.brand-txt {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.hero-scan {
+  position: absolute;
+  z-index: 0;
+  top: 54px;
+  left: 12%;
+  width: 76%;
+  height: 64px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--acc-soft) 28%, var(--acc-glow) 50%, var(--acc-soft) 72%, transparent);
+  transform: translate3d(-48%, 0, 0);
+  animation: radar-scan 4s ease-in-out infinite alternate;
 }
 
-.brand-line {
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.idx.is-dark .hero-scan { opacity: 0.24; }
+
+@keyframes radar-scan {
+  from { transform: translate3d(-48%, 0, 0); opacity: 0.12; }
+  to { transform: translate3d(48%, 0, 0); opacity: 0.5; }
 }
+
+.hero-top,
+.hero-main,
+.hero-stats { position: relative; z-index: 1; }
+
+.hero-top { display: flex; align-items: center; gap: 10px; }
+.brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.brand-txt { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.brand-line { display: flex; align-items: center; gap: 8px; }
 
 .logo {
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: 2.4px;
   color: var(--t1);
+  font-size: 17px;
+  font-weight: 800;
   line-height: 1;
+  letter-spacing: 3px;
 }
-
-.logo-acc { color: var(--acc); margin-left: 1px; }
 
 .app-tag {
-  font-size: 8.5px;
-  letter-spacing: 1.2px;
-  padding: 1px 5px;
-  border-radius: 5px;
+  padding: 2px 5px;
   border: 1px solid var(--bd);
-  color: var(--t3);
-  line-height: 1.5;
+  border-radius: 4px;
+  color: var(--acc);
+  font-size: 7.5px;
+  line-height: 1.4;
+  letter-spacing: 0.8px;
 }
 
-.tagline {
-  font-size: 11.5px;
-  color: var(--t3);
-  letter-spacing: 0.02em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.top-actions { display: flex; gap: 8px; flex: none; }
+.brand-sub { color: var(--t3); font-size: 8px; letter-spacing: 1.1px; white-space: nowrap; }
+.top-actions { display: flex; flex: none; gap: 7px; }
 
 .iconbtn {
   width: 34px;
   height: 34px;
-  border-radius: 11px;
   display: grid;
   place-items: center;
   border: 1px solid var(--bd);
-  background: var(--s1);
+  border-radius: 11px;
+  background: var(--acc-soft);
   color: var(--t2);
-  box-shadow: var(--card-shadow);
-  transition: transform var(--t-fast) var(--ease-out);
+  transition: transform 90ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
 }
 
-.iconbtn:active { transform: scale(0.94); }
-
+.iconbtn:active { transform: scale(0.97); }
 .iconbtn.spin .glyph { animation: spin 900ms linear infinite; }
-
 .glyph { font-size: 15px; line-height: 1; }
-
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── 统计条 ─────────────────────────────────────────────────────────── */
+.hero-main { display: flex; align-items: flex-end; gap: 12px; margin-top: 24px; padding-bottom: 20px; }
+.hero-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hero-kicker { margin-bottom: 6px; color: var(--acc); font-size: 8px; letter-spacing: 1.4px; }
 
-.strip {
+.hero-title {
+  color: var(--t1);
+  font-size: 30px;
+  font-weight: 750;
+  line-height: 1.25;
+  letter-spacing: -0.6px;
+}
+
+.hero-desc { margin-top: 7px; color: var(--t2); font-size: 12px; letter-spacing: 0.4px; }
+.online-readout { flex: none; display: flex; flex-direction: column; align-items: flex-end; }
+
+.online-n {
+  color: var(--t1);
+  font-size: 40px;
+  font-weight: 500;
+  line-height: 0.95;
+  letter-spacing: -2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.online-k { margin-top: 5px; color: var(--t3); font-size: 7px; letter-spacing: 1.8px; }
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+  padding: 4px 7px;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  background: var(--acc-soft);
+  color: var(--acc);
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-pill.idle { color: var(--t2); }
+.status-pill-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+.hero-stats {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid var(--bd);
+}
+
+.hero-stat {
+  min-width: 67px;
   display: flex;
   align-items: baseline;
   gap: 5px;
-  padding: 0 2px 2px;
-  font-size: 11.5px;
-  color: var(--t3);
+  padding-right: 12px;
+  margin-right: 12px;
+  border-right: 1px solid var(--bd);
 }
 
-.strip-i { display: flex; align-items: baseline; gap: 4px; }
-.strip-n { font-size: 13px; font-weight: 700; color: var(--t1); }
-.strip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--acc);
-  align-self: center;
-}
-.strip-sep { opacity: 0.5; margin: 0 2px; }
+.hero-stat-v { color: var(--t1); font-size: 13px; font-weight: 650; }
+.hero-stat-v.warn { color: var(--warn); }
+.hero-stat-k { color: var(--t3); font-size: 8px; white-space: nowrap; }
+.hero-live { margin-left: auto; color: var(--t3); font-size: 7px; letter-spacing: 0.6px; }
 
-.strip-warn {
-  margin-left: auto;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--warn-soft);
-  color: var(--warn);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-}
-
-/* ── 区块标题 ───────────────────────────────────────────────────────── */
-
-.block { margin-top: 16px; }
-
-.block-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 2px;
-  margin-bottom: 8px;
-}
-
-.block-t {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--t2);
-}
+/* ── 区块导航 ──────────────────────────────────────────────────────── */
+.block { margin-top: 24px; }
+.block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 0 2px; }
+.block-heading { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.block-t { color: var(--t1); font-size: 13px; font-weight: 650; letter-spacing: 0.4px; }
+.block-code { color: var(--t3); font-size: 7.5px; letter-spacing: 1.1px; }
 
 .block-n {
-  font-size: 10.5px;
-  color: var(--t3);
-  padding: 1px 6px;
+  min-width: 23px;
+  padding: 2px 6px;
+  border: 1px solid var(--bd);
   border-radius: 999px;
-  background: var(--s2);
+  color: var(--t2);
+  background: var(--acc-soft);
+  font-size: 9px;
+  text-align: center;
 }
 
-.block-sync { margin-left: auto; font-size: 10px; color: var(--acc); }
+.block-sync { color: var(--acc); font-size: 9px; }
 
-/* ── 待确认配对卡 ───────────────────────────────────────────────────── */
-
+/* ── 待确认配对：琥珀色静态底 + opacity 脉冲描边 ────────────────────── */
 .pairing {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px;
-  margin-bottom: 8px;
-  border-radius: var(--r-lg);
-  border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent);
-  background: linear-gradient(180deg, var(--warn-soft), var(--s1) 78%);
+  gap: 11px;
+  margin-bottom: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 46%, transparent);
+  border-radius: var(--r-console);
+  background: linear-gradient(130deg, var(--warn-soft), var(--glass-bottom) 70%);
   box-shadow: var(--card-shadow);
+  transition: transform 120ms ease-out;
 }
 
-.pairing:active { transform: scale(0.992); }
+.pairing::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--warn);
+  border-radius: inherit;
+  opacity: 0.1;
+  pointer-events: none;
+  animation: auth-pulse 2s ease-in-out infinite;
+}
+
+.pairing:active { transform: scale(0.99); }
+@keyframes auth-pulse { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.8; } }
 
 .pairing-ico {
   flex: none;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 38px;
+  height: 38px;
   display: grid;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 12px;
   background: var(--warn-soft);
   color: var(--warn);
-  font-size: 17px;
+  font-size: 19px;
 }
 
-.pairing-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.pairing-t {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--t1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pairing-d { font-size: 11px; line-height: 16px; color: var(--t2); }
-.pairing-addr {
-  font-size: 10px;
-  color: var(--t3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.pairing-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pairing-t { overflow: hidden; color: var(--t1); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pairing-d { color: var(--t2); font-size: 10.5px; line-height: 16px; }
+.pairing-addr { overflow: hidden; color: var(--t3); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 
 .pairing-btn {
   flex: none;
-  height: 32px;
-  padding: 0 11px;
-  border-radius: 9px;
   display: flex;
   align-items: center;
-  border: 1px solid var(--bd-strong);
-  background: var(--s1);
-  color: var(--acc);
-  font-size: 11.5px;
-  font-weight: 600;
+  gap: 4px;
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 650;
 }
 
-/* ── 设备卡 ─────────────────────────────────────────────────────────── */
+.pairing-arrow { font-size: 18px; font-weight: 400; }
 
+/* ── 在线玻璃设备卡 / 1px 流光边框 ──────────────────────────────────── */
 .dev {
   position: relative;
-  padding: 13px 13px 11px;
-  margin-bottom: 10px;
-  border-radius: var(--r-lg);
+  margin-bottom: 12px;
+  padding: 15px 15px 12px;
   border: 1px solid var(--bd);
-  background: var(--s1);
-  box-shadow: var(--card-shadow);
-  transition: transform var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
-  overflow: hidden;
+  border-radius: var(--r-console);
+  background:
+    linear-gradient(125deg, var(--glass-hi), transparent 30%),
+    linear-gradient(155deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: var(--card-shadow), inset 0 1px 0 var(--glass-hi);
+  transition: transform 120ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
 }
 
-.dev:active { transform: scale(0.992); }
-
-/* 当前设备：描边加深，表示"点进去就是这台" */
+.dev:active { transform: scale(0.99); }
 .dev.current { border-color: var(--bd-strong); }
 
-/* 锁屏：整张卡染成警戒色，但只有这一张——不整页变红 */
-.dev.locked {
-  border-color: var(--danger-bd);
-  background: linear-gradient(180deg, var(--danger-soft), var(--s1) 70%);
+.dev-rim {
+  position: absolute;
+  z-index: 0;
+  inset: -1px;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
 }
 
-/* 离线：抽掉"发光"，但保留可读性 */
-.dev.off { background: var(--s2); border-color: var(--bd); }
+.dev.is-online .dev-rim { opacity: 0.9; }
+
+.dev-flow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 180%;
+  aspect-ratio: 1;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0deg, transparent 245deg, var(--acc) 305deg, var(--glass-hi) 330deg, transparent 360deg);
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: rim-orbit 6s linear infinite;
+  /* mask 在外层执行，保证任何旋转角度都只露出卡片的 1px 边圈。 */
+}
+
+.dev-rim {
+  -webkit-mask: linear-gradient(var(--t1) 0 0) content-box, linear-gradient(var(--t1) 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(var(--t1) 0 0) content-box, linear-gradient(var(--t1) 0 0);
+  mask-composite: exclude;
+  padding: 1px;
+}
+
+@keyframes rim-orbit {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.dev.locked { border-color: var(--danger-bd); background: linear-gradient(150deg, var(--danger-soft), var(--glass-bottom) 65%); }
+.dev.off { background: linear-gradient(155deg, var(--glass-bottom), var(--s2)); }
 .dev.off .dev-name { color: var(--t2); }
-.dev.off .dev-state { color: var(--t3); }
+.dev-content { position: relative; z-index: 1; }
 
-.dev-head { display: flex; align-items: flex-start; gap: 9px; }
+.dev-head { display: flex; align-items: flex-start; gap: 10px; }
+.dev-dot { position: relative; flex: none; width: 13px; height: 13px; display: grid; place-items: center; margin-top: 4px; }
+.dev-dot :deep(.dot), .dev-dot :deep(.wave) { position: relative; z-index: 1; }
 
-.dev-dot { flex: none; padding-top: 5px; }
-
-.dev-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-
-.dev-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-
-.dev-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--t1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.radar-ring {
+  position: absolute;
+  z-index: 0;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--acc);
+  border-radius: 50%;
+  opacity: 0;
+  animation: radar-breathe 1.8s ease-out infinite;
 }
 
-.dev-host {
-  font-size: 10.5px;
-  color: var(--t3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@keyframes radar-breathe {
+  0% { opacity: 0.5; transform: scale(1); }
+  85%, 100% { opacity: 0; transform: scale(1.9); }
 }
 
-.dev-lat {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-  padding-top: 1px;
-}
-
-.dev-lat-v { font-size: 12px; font-weight: 700; line-height: 1.2; }
+.dev-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.dev-name-row { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.dev-name { overflow: hidden; color: var(--t1); font-size: 15px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.dev-host { overflow: hidden; color: var(--t3); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.dev-lat { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; padding-top: 1px; }
+.dev-lat-v { font-size: 12px; font-weight: 650; line-height: 1.2; }
 .dev-lat-v.ok { color: var(--ok); }
 .dev-lat-v.mid { color: var(--warn); }
 .dev-lat-v.slow { color: var(--danger); }
 .dev-lat-v.dim { color: var(--t3); }
-.dev-lat-k { font-size: 9px; color: var(--t3); letter-spacing: 0.04em; }
+.dev-lat-k { color: var(--t3); font-size: 6.5px; letter-spacing: 0.5px; }
 
 .dev-more {
   flex: none;
-  width: 26px;
-  height: 26px;
-  margin: -3px -4px 0 2px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
+  margin: -4px -5px 0 0;
+  border-radius: 8px;
   color: var(--t3);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
+  transition: transform 90ms ease-out, background-color 160ms ease-out;
 }
 
-.dev-more:active { background: var(--s2); color: var(--t2); }
-
-/* ── 设备数据量 ─────────────────────────────────────────────────────── */
+.dev-more:active { transform: scale(0.97); background: var(--s2); color: var(--t2); }
 
 .metrics {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid var(--bd);
-}
-
-.metric {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
+  margin-top: 15px;
+  padding: 11px 0;
+  border-top: 1px solid var(--bd);
+  border-bottom: 1px solid var(--bd);
+  background: linear-gradient(90deg, transparent, var(--acc-soft), transparent);
 }
 
-.metric-v { font-size: 14px; font-weight: 700; color: var(--t1); line-height: 1.2; }
-.metric-k { font-size: 9.5px; color: var(--t3); white-space: nowrap; }
+.metric { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-left: 10px; border-left: 1px solid var(--bd); }
+.metric:first-child { padding-left: 0; border-left: 0; }
+.metric-v { color: var(--t1); font-size: 18px; font-weight: 550; line-height: 1; font-variant-numeric: tabular-nums; }
+.metric-k { color: var(--t3); font-size: 9px; white-space: nowrap; }
 
-.dev-cost {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.cost { font-size: 10.5px; color: var(--t2); }
-.peak { font-size: 10px; }
+.dev-cost { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+.cost { color: var(--t2); font-size: 10px; }
+.peak { font-size: 9px; }
 .peak.peak { color: var(--warn); }
 .peak.valley { color: var(--acc); }
-
-.dev-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 9px;
-}
-
-.dev-state { font-size: 10.5px; color: var(--t2); letter-spacing: 0.02em; }
+.dev-foot { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+.dev-status { display: flex; align-items: center; gap: 5px; }
+.dev-status-mark { width: 3px; height: 3px; border-radius: 50%; background: var(--t3); }
+.dev-status-mark.online { background: var(--acc); }
+.dev-status-mark.connecting { background: var(--warn); }
+.dev-status-mark.locked { background: var(--danger); }
+.dev-state { color: var(--t2); font-size: 10px; letter-spacing: 0.3px; }
 .dev-state.online { color: var(--acc); }
 .dev-state.connecting { color: var(--warn); }
 .dev-state.locked { color: var(--danger); }
 .dev-state.needs-auth { color: var(--warn); }
 
 .dev-unlock {
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 7px;
+  height: 26px;
   display: flex;
   align-items: center;
+  padding: 0 9px;
   border: 1px solid var(--danger-bd);
+  border-radius: 8px;
   color: var(--danger);
-  font-size: 10.5px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .dev-unlock:active { background: var(--danger-soft); }
-
 .grow { flex: 1; }
+.dev-go { display: flex; align-items: center; gap: 7px; color: var(--t2); font-size: 10px; }
+.dev-go-arrow { color: var(--acc); font-size: 16px; line-height: 1; }
 
-.dev-go { font-size: 10.5px; color: var(--t3); }
-
-/* ── 空态 ───────────────────────────────────────────────────────────── */
-
+/* ── 空态：保留两个真实入口 ────────────────────────────────────────── */
 .empty {
-  padding: 18px 15px;
-  border-radius: var(--r-lg);
-  border: 1px dashed var(--bd);
-  background: var(--s1);
+  padding: 24px 16px 18px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r-console);
+  background: linear-gradient(155deg, var(--glass-top), var(--glass-bottom));
+  text-align: center;
 }
 
-.empty-t { display: block; font-size: 14px; font-weight: 600; color: var(--t1); }
-.empty-d {
-  display: block;
-  margin-top: 6px;
-  font-size: 11.5px;
-  line-height: 18px;
-  color: var(--t2);
-}
-
-.empty-acts { display: flex; gap: 8px; margin-top: 12px; }
+.empty-signal { height: 28px; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 12px; }
+.empty-signal view { width: 4px; height: 12px; border-radius: 2px; background: var(--acc); opacity: 0.45; }
+.empty-signal view:nth-child(2) { height: 26px; opacity: 0.9; }
+.empty-signal view:nth-child(3) { height: 18px; opacity: 0.65; }
+.empty-t { display: block; color: var(--t1); font-size: 15px; font-weight: 650; }
+.empty-d { display: block; max-width: 310px; margin: 8px auto 0; color: var(--t2); font-size: 11px; line-height: 18px; }
+.empty-acts { display: flex; gap: 9px; margin-top: 17px; }
 
 .empty-btn {
   flex: 1;
-  height: 38px;
-  border-radius: 10px;
+  min-width: 0;
+  height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12.5px;
-  font-weight: 600;
   border: 1px solid var(--bd);
+  border-radius: 12px;
   color: var(--t2);
+  font-size: 12px;
+  font-weight: 650;
+  transition: transform 90ms ease-out, background-color 160ms ease-out;
 }
 
-.empty-btn:active { transform: scale(0.98); }
-.empty-btn.primary { background: var(--acc); border-color: transparent; color: var(--acc-ink); }
+.empty-btn:active { transform: scale(0.97); }
+.empty-btn.primary { border-color: transparent; background: linear-gradient(120deg, var(--acc), color-mix(in srgb, var(--acc) 74%, var(--t1))); color: var(--acc-ink); }
 .empty-btn.ghost { background: var(--s2); }
 
-/* ── 本地域入口 ─────────────────────────────────────────────────────── */
-
+/* ── 本地域：虚线 + 独立的纯 CSS 存储图标 ───────────────────────────── */
 .local {
   display: flex;
   align-items: center;
-  gap: 11px;
-  margin-top: 16px;
-  padding: 13px;
-  border-radius: var(--r-lg);
-  border: 1px solid var(--bd);
-  background: linear-gradient(150deg, var(--s1), var(--s2));
-  box-shadow: var(--card-shadow);
-  transition: transform var(--t-fast) var(--ease-out);
+  gap: 12px;
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px dashed var(--bd-strong);
+  border-radius: var(--r-console);
+  background: linear-gradient(145deg, var(--glass-bottom), color-mix(in srgb, var(--s2) 74%, transparent));
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--bg-grad-3) 8%, transparent);
+  transition: transform 120ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
 }
 
-.local:active { transform: scale(0.992); }
-.local.on { border-color: var(--bd-strong); }
+.local:active { transform: scale(0.99); }
+.local.on { border-color: var(--acc); }
 
 .local-ico {
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 11px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
   border: 1px solid var(--bd);
+  border-radius: 13px;
   background: var(--acc-soft);
-  color: var(--acc);
-  font-size: 15px;
 }
 
-.local-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.local-head { display: flex; align-items: center; gap: 6px; }
-.local-t { font-size: 14px; font-weight: 600; color: var(--t1); }
-.local-d { font-size: 11px; line-height: 16px; color: var(--t2); }
-.local-chev { flex: none; font-size: 18px; color: var(--t3); }
+.local-glyph { position: relative; width: 17px; height: 15px; border: 1.5px solid var(--acc); border-radius: 4px; }
+.local-glyph::before { content: ''; position: absolute; left: 3px; right: 3px; top: 4px; height: 1px; background: var(--acc); }
+.local-glyph::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--acc); }
+.local-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.local-head { display: flex; align-items: center; gap: 7px; }
+.local-t { color: var(--t1); font-size: 14px; font-weight: 650; }
+.local-code { color: var(--t3); font-size: 7px; letter-spacing: 0.7px; }
+.local-d { color: var(--t2); font-size: 10.5px; line-height: 17px; }
+.local-chev { flex: none; color: var(--acc); font-size: 20px; }
 
-/* ── 页脚 ───────────────────────────────────────────────────────────── */
+.foot { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 22px; color: var(--t3); font-size: 8px; letter-spacing: 0.5px; opacity: 0.8; }
+.foot-lock { position: relative; width: 7px; height: 6px; margin-right: 2px; border: 1px solid var(--t3); border-radius: 1px; }
+.foot-lock::before { content: ''; position: absolute; left: 1px; top: -5px; width: 3px; height: 4px; border: 1px solid var(--t3); border-bottom: 0; border-radius: 3px 3px 0 0; }
 
-.foot {
-  margin-top: 18px;
-  text-align: center;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  color: var(--t3);
-  opacity: 0.8;
-}
-
-/* ── 底部主操作 ─────────────────────────────────────────────────────── */
-
+/* ── 底部配对 dock / 安全区 ────────────────────────────────────────── */
 .dock {
   flex: none;
-  padding: 10px var(--gutter) calc(var(--safe-bottom-real, env(safe-area-inset-bottom)) + 8px);
-  background: linear-gradient(180deg, transparent, var(--bg-grad-2) 42%, var(--bg));
+  padding: 14px var(--gutter) calc(var(--safe-bottom-real, env(safe-area-inset-bottom)) + 4px);
+  border-top: 1px solid var(--bd);
+  background: linear-gradient(180deg, transparent, var(--glass-bottom) 30%, var(--bg));
 }
 
-.dock-inner {
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+.dock-inner { width: 100%; max-width: var(--content-max); margin: 0 auto; display: flex; flex-direction: column; gap: 5px; }
 
 .cta {
-  height: 52px;
-  border-radius: var(--r-lg);
+  position: relative;
+  height: 54px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  background: var(--acc);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--acc) 78%, var(--t1));
+  border-radius: 17px;
+  background: linear-gradient(110deg, color-mix(in srgb, var(--acc) 82%, var(--bg)), var(--acc) 52%, color-mix(in srgb, var(--acc) 76%, var(--t1)));
+  box-shadow: var(--cta-shadow), inset 0 1px 0 var(--glass-hi);
   color: var(--acc-ink);
   font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  box-shadow: var(--cta-shadow);
-  transition: transform var(--t-fast) var(--ease-out);
+  font-weight: 750;
+  letter-spacing: 0.5px;
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
 }
 
-.cta:active { transform: scale(0.975); }
-
-.cta-plus { font-size: 17px; line-height: 1; }
-.cta-t { line-height: 1; }
-
-.dock-alt {
-  text-align: center;
-  font-size: 10.5px;
-  color: var(--t3);
-  letter-spacing: 0.03em;
-  padding: 2px 0 0;
+.cta::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, var(--glass-hi), transparent);
+  opacity: 0.35;
+  pointer-events: none;
+  transform: translateX(-140%) skewX(-18deg);
 }
 
-.dock-alt:active { color: var(--t2); }
+.cta:active { transform: scale(0.97); opacity: 0.96; }
+.cta-plus { position: relative; z-index: 1; font-size: 18px; line-height: 1; }
+.cta-t { position: relative; z-index: 1; line-height: 1; }
+.cta-code { position: absolute; z-index: 1; right: 15px; font-size: 7px; font-weight: 500; letter-spacing: 1px; opacity: 0.6; }
+.dock-alt { min-height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; color: var(--t2); font-size: 10px; letter-spacing: 0.3px; transition: transform 90ms ease-out, color 160ms ease-out; }
+.dock-alt:active { transform: scale(0.97); color: var(--acc); }
+.dock-alt-arrow { color: var(--acc); font-size: 11px; }
 
-/* ── 弹层：底部升起的卡片，与全站同一套语言 ─────────────────────────── */
-
+/* ── 弹层与配对流程（交互不变） ─────────────────────────────────────── */
 .mask {
   position: fixed;
   inset: 0;
@@ -1511,125 +1633,60 @@ onLoad(() => {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 8px 16px 16px;
-  border-radius: var(--r-lg);
   border: 1px solid var(--bd);
+  border-radius: 22px;
   background: var(--s1);
   box-shadow: var(--card-shadow);
   animation: rise var(--t-mid) var(--ease-out);
 }
 
-@keyframes rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-
-.sheet-grab {
-  width: 34px;
-  height: 3px;
-  margin: 0 auto 10px;
-  border-radius: 2px;
-  background: var(--bd-strong);
-}
-
-.sheet-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.sheet-grab { width: 34px; height: 3px; margin: 0 auto 10px; border-radius: 2px; background: var(--bd-strong); }
+.sheet-head { display: flex; align-items: flex-start; gap: 10px; }
 .sheet-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.sheet-t { font-size: 15px; font-weight: 700; color: var(--t1); }
-.sheet-s { font-size: 11.5px; line-height: 18px; color: var(--t2); }
-
-.sheet-x {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  margin: -2px -2px 0 0;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: var(--t3);
-  font-size: 17px;
-  line-height: 1;
-}
-
+.sheet-t { color: var(--t1); font-size: 15px; font-weight: 700; }
+.sheet-s { color: var(--t2); font-size: 11.5px; line-height: 18px; }
+.sheet-x { flex: none; width: 28px; height: 28px; display: grid; place-items: center; margin: -2px -2px 0 0; border-radius: 8px; color: var(--t3); font-size: 17px; line-height: 1; }
 .sheet-x:active { background: var(--s2); color: var(--t2); }
-
 .sheet-acts { display: flex; gap: 10px; margin-top: 16px; }
 .sheet-acts .btn { flex: 1; }
 
-/* ── 扫码按钮 ───────────────────────────────────────────────────────── */
-
 .scan-btn {
+  height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 50px;
   margin-top: 14px;
-  border-radius: var(--r-md);
   border: 1px solid var(--bd-strong);
+  border-radius: var(--r-md);
   background: var(--acc-soft);
   color: var(--acc);
   font-size: 14px;
   font-weight: 600;
+  transition: transform 90ms ease-out;
 }
 
-.scan-btn:active { transform: scale(0.985); }
-
-/* 扫码图标：四个角 + 扫描线，纯 CSS */
-.scan-ico {
-  position: relative;
-  width: 20px;
-  height: 20px;
-  flex: none;
-}
-
-.scan-corner {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border: 2px solid currentColor;
-}
-
+.scan-btn:active { transform: scale(0.97); }
+.scan-ico { position: relative; flex: none; width: 20px; height: 20px; }
+.scan-corner { position: absolute; width: 7px; height: 7px; border: 2px solid currentColor; }
 .scan-corner.tl { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 2px; }
 .scan-corner.tr { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 2px; }
 .scan-corner.bl { bottom: 0; left: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 2px; }
 .scan-corner.br { bottom: 0; right: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 2px; }
-
-.scan-line {
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  top: 50%;
-  height: 2px;
-  margin-top: -1px;
-  border-radius: 1px;
-  background: currentColor;
-}
-
+.scan-line { position: absolute; left: 2px; right: 2px; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: currentColor; }
 .scan-t { line-height: 1; }
-
-/* ── 配对输入 ───────────────────────────────────────────────────────── */
-
-.or-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 12px 0 2px;
-}
-
+.or-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 2px; }
 .or-line { flex: 1; height: 1px; background: var(--bd); }
-.or-t { font-size: 10px; letter-spacing: 0.08em; color: var(--t3); }
+.or-t { color: var(--t3); font-size: 10px; letter-spacing: 0.8px; }
 
 .pair-input {
   width: 100%;
   height: 50px;
   margin: 12px 0 6px;
   padding: 0 14px;
-  border-radius: var(--r-md);
   border: 1px solid var(--bd-strong);
+  border-radius: var(--r-md);
   background: var(--bg);
   color: var(--t1);
   font-size: 23px;
@@ -1637,55 +1694,41 @@ onLoad(() => {
   text-align: center;
 }
 
-.addr-input {
-  width: 100%;
-  height: 42px;
-  margin-top: 8px;
-  padding: 0 12px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--bd);
-  background: var(--bg);
-  color: var(--t2);
-  font-size: 12px;
-}
-
-.pair-err {
-  display: block;
-  margin-top: 8px;
-  font-size: 11.5px;
-  line-height: 17px;
-  color: var(--danger);
-}
-
-/* ── 通用小标签 ─────────────────────────────────────────────────────── */
-
-.pill {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 5px;
-  font-size: 9.5px;
-  line-height: 1.6;
-  letter-spacing: 0.02em;
-}
-
+.addr-input { width: 100%; height: 42px; margin-top: 8px; padding: 0 12px; border: 1px solid var(--bd); border-radius: var(--r-md); background: var(--bg); color: var(--t2); font-size: 12px; }
+.pair-err { display: block; margin-top: 8px; color: var(--danger); font-size: 11.5px; line-height: 17px; }
+.pill { flex: none; padding: 1px 6px; border-radius: 5px; font-size: 9px; line-height: 1.6; letter-spacing: 0.2px; }
 .pill.acc { background: var(--acc-soft); color: var(--acc); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .pill.danger { background: var(--danger-soft); color: var(--danger); }
-
 .shake { animation: shake 260ms var(--ease-out); }
+@keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
 
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-5px); }
-  75% { transform: translateX(5px); }
+/* 前 8 条设备/待确认卡 45ms 递进；之后的卡片不带 enter，无入场动画。 */
+.enter { animation: card-enter 260ms var(--ease-out) both; }
+.dev.enter, .pairing.enter, .local.enter { animation-duration: 220ms; animation-timing-function: ease-out; }
+@keyframes card-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 平板设备矩阵双列；入场计数仍按列表前 8 条，而非每列 8 条。 */
+@media (min-width: 700px) {
+  .devices-block { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+  .devices-block .block-head, .devices-block .empty { grid-column: 1 / -1; }
+  .dev { min-width: 0; }
+  .hero-title { font-size: 34px; }
 }
 
-/* 减少动效偏好：关掉弹层升起、抖动与图标旋转 */
+/* state.lite：本页全部动画关闭；:deep 同时覆盖 MossDot / MossBadge 等子组件。 */
+.idx.is-lite :deep(*) { animation: none !important; transition: none !important; }
+.idx.is-lite .enter { opacity: 1; transform: none; }
+.idx.is-lite .aurora { display: none; }
+.idx.is-lite .hero-scan { display: none; }
+.idx.is-lite .dev-rim { opacity: 0.42; }
+.idx.is-lite .radar-ring { opacity: 0; }
+
+/* 系统减少动效：与 lite 一致，所有动画和本页过渡均退化。 */
 @media (prefers-reduced-motion: reduce) {
-  .sheet,
-  .shake,
-  .iconbtn.spin .glyph {
-    animation: none !important;
-  }
+  .idx :deep(*) { animation: none !important; transition: none !important; }
+  .idx .enter { opacity: 1; transform: none; }
+  .idx .aurora, .idx .hero-scan { display: none; }
+  .idx .radar-ring { opacity: 0; }
 }
 </style>

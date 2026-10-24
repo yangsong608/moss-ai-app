@@ -356,11 +356,11 @@ onMounted(selectFirstForWide)
 
       <scroll-view scroll-x class="chips" :show-scrollbar="false">
         <view class="chip-row">
-          <view class="chip" :class="{ on: filter === ALL }" @tap="setFilter(ALL)">
+          <view class="chip fb-press" :class="{ on: filter === ALL }" @tap="setFilter(ALL)">
             <text>全部</text>
             <text class="chip-n mono">{{ data.notes.length }}</text>
           </view>
-          <view class="chip" :class="{ on: filter === FAV }" @tap="setFilter(FAV)">
+          <view class="chip fb-press" :class="{ on: filter === FAV }" @tap="setFilter(FAV)">
             <text>收藏</text>
             <text class="chip-n mono">{{ favCount }}</text>
           </view>
@@ -368,7 +368,7 @@ onMounted(selectFirstForWide)
           <view
             v-for="nb in notebookRows"
             :key="nb.name"
-            class="chip nb"
+            class="chip nb fb-press"
             :class="{ on: filter === nb.name }"
             @tap="setFilter(nb.name)"
             @longpress="openNotebookMenu(nb.name)"
@@ -379,7 +379,7 @@ onMounted(selectFirstForWide)
               <text>⋯</text>
             </view>
           </view>
-          <view class="chip add" @tap="promptNewNotebook('only')">
+          <view class="chip add fb-press" @tap="promptNewNotebook('only')">
             <text>＋ 新建笔记本</text>
           </view>
         </view>
@@ -412,27 +412,28 @@ onMounted(selectFirstForWide)
             <text class="nb-count mono">{{ nb.count }}</text>
             <view class="nb-more" @tap.stop="openNotebookMenu(nb.name)"><text>⋯</text></view>
           </view>
-          <view class="nb-add" @tap="promptNewNotebook('only')">
+          <view class="nb-add fb-press" @tap="promptNewNotebook('only')">
             <text>＋ 新建笔记本</text>
           </view>
         </view>
 
-        <view class="list-col">
-          <view v-if="filteredNotes.length === 0" class="empty">
+        <view :key="filter" class="list-col">
+          <view v-if="filteredNotes.length === 0" class="empty fb-empty">
+            <text class="fb-empty-icon">▤</text>
             <text>这里还没有笔记。</text>
-            <text class="empty-hint">右上角「新建」，或换一个笔记本看看。</text>
+            <text class="empty-hint">点右上「新建」写下第一篇，或切换其它笔记本。</text>
           </view>
 
           <view
-            v-for="n in filteredNotes"
+            v-for="(n, index) in filteredNotes"
             :key="n.id"
             class="note-card"
-            :class="{ on: n.id === readingId }"
+            :class="[{ on: n.id === readingId }, index < 8 ? `fb-stagger fb-i-${index}` : '']"
             @tap="openNote(n.id)"
           >
             <view class="nc-top">
               <text class="nc-title">{{ n.title || '未命名笔记' }}</text>
-              <view class="star" :class="{ on: n.fav }" @tap.stop="toggleFav(n.id)">
+              <view class="star fb-press" :class="{ on: n.fav }" @tap.stop="toggleFav(n.id)">
                 <text>{{ n.fav ? '★' : '☆' }}</text>
               </view>
             </view>
@@ -444,7 +445,7 @@ onMounted(selectFirstForWide)
                 <text class="nc-time mono">{{ timeLabel(n.updatedAt) }}</text>
               </view>
               <!-- 右下「预览」：直接进整页预览，不经过编辑器；stop 防止连带进阅读态 -->
-              <view class="nc-pv" @tap.stop="openPreview(n.id)">
+              <view class="nc-pv fb-press" @tap.stop="openPreview(n.id)">
                 <text class="nc-pv-ic">▤</text>
                 <text class="nc-pv-tx">预览</text>
               </view>
@@ -460,10 +461,10 @@ onMounted(selectFirstForWide)
               <text class="nb-tag">{{ readingNote.notebook }}</text>
               <text class="rd-time mono">{{ timeLabel(readingNote.updatedAt) }}</text>
               <view class="sp" />
-              <view class="rd-star" :class="{ on: readingNote.fav }" @tap="toggleFav(readingNote.id)">
+              <view class="rd-star fb-press" :class="{ on: readingNote.fav }" @tap="toggleFav(readingNote.id)">
                 <text>{{ readingNote.fav ? '★' : '☆' }}</text>
               </view>
-              <view class="rd-edit" @tap="openEditor(readingNote.id)"><text>编辑</text></view>
+              <view class="rd-edit fb-press" @tap="openEditor(readingNote.id)"><text>编辑</text></view>
             </view>
 
             <scroll-view scroll-y class="rd-body">
@@ -550,7 +551,7 @@ onMounted(selectFirstForWide)
   color: var(--t2);
   font-size: 11.5px;
   font-weight: 600;
-  transition: background 160ms var(--ease-out), border-color 160ms var(--ease-out);
+  transition: transform 90ms ease-out, opacity 120ms ease-out, background 160ms var(--ease-out), border-color 160ms var(--ease-out);
 }
 .chip:active { transform: scale(0.97); }
 .chip.on {
@@ -646,7 +647,7 @@ onMounted(selectFirstForWide)
   border-radius: var(--r-md);
   background: var(--s1);
   border: 1px solid var(--bd);
-  transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+  transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out), border-color 160ms var(--ease-out), background 160ms var(--ease-out);
 }
 .note-card:active { transform: scale(0.995); }
 .note-card.on {
@@ -718,7 +719,7 @@ onMounted(selectFirstForWide)
   color: var(--t2);
   font-size: 10px;
   line-height: 1;
-  transition: color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+  transition: transform 90ms ease-out, color 140ms var(--ease-out), border-color 140ms var(--ease-out);
 }
 .nc-pv:active {
   color: var(--acc);
@@ -879,7 +880,8 @@ onMounted(selectFirstForWide)
   border-radius: var(--r-lg);
   color: var(--t3);
 }
-.ph-mark { font-size: 30px; color: var(--acc); opacity: 0.7; }
+.ph-mark { font-size: 30px; color: var(--acc); opacity: 0.7; animation: ph-breathe 1.6s ease-in-out infinite; }
+@keyframes ph-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .ph-title { font-size: 13px; font-weight: 600; color: var(--t2); }
 .ph-sub { font-size: 10.5px; line-height: 1.7; text-align: center; padding: 0 24px; }
 

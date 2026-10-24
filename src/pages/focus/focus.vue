@@ -36,10 +36,9 @@ let settled = false
 
 const totalSec = computed(() => presetMin.value * 60)
 const elapsedSec = computed(() => Math.max(0, totalSec.value - leftSec.value))
-const ringDeg = computed(() => Math.min(360, Math.round((elapsedSec.value / totalSec.value) * 360)))
-const ringStyle = computed(() => ({
-  background: `conic-gradient(var(--acc) ${ringDeg.value}deg, var(--s3) 0deg)`,
-}))
+const ringDeg = computed(() => Math.min(360, (elapsedSec.value / totalSec.value) * 360))
+const rightRingStyle = computed(() => ({ transform: `rotate(${180 + Math.min(180, ringDeg.value)}deg)` }))
+const leftRingStyle = computed(() => ({ transform: `rotate(${180 + Math.max(0, ringDeg.value - 180)}deg)` }))
 
 const clock = computed(() => {
   const s = leftSec.value
@@ -218,7 +217,9 @@ onUnmounted(() => {
         <!-- 计时区 -->
         <view class="timer-card">
           <text class="eyebrow">FOCUS / {{ presetMin }} MIN</text>
-          <view class="ring" :style="ringStyle">
+          <view class="ring">
+            <view class="ring-half right"><view class="ring-rotor" :style="rightRingStyle" /></view>
+            <view class="ring-half left"><view class="ring-rotor" :style="leftRingStyle" /></view>
             <view class="ring-hole">
               <text class="ring-time mono">{{ clock }}</text>
               <text class="ring-state" :class="{ live: phase === 'running', done: phase === 'done' }">{{ phaseText }}</text>
@@ -229,7 +230,7 @@ onUnmounted(() => {
             <view
               v-for="m in PRESETS"
               :key="m"
-              class="preset"
+              class="preset fb-press"
               :class="{ on: presetMin === m }"
               @tap="applyPreset(m)"
             >
@@ -265,14 +266,15 @@ onUnmounted(() => {
             <text class="sect-n">{{ openTasks.length }} 条待专注</text>
           </view>
 
-          <view v-if="queueTasks.length === 0" class="empty">
-            <text>待办清空了。可以先在「今天」加一条任务，或直接开始自由专注。</text>
+          <view v-if="queueTasks.length === 0" class="empty fb-empty">
+            <text class="fb-empty-icon">◷</text>
+            <text>点「开始专注」直接自由计时，或先去「今天」添加任务。</text>
           </view>
           <view
             v-for="(t, i) in queueTasks"
             :key="t.id"
             class="queue-item"
-            :class="{ on: t.id === focusTaskId }"
+            :class="[{ on: t.id === focusTaskId }, `fb-stagger fb-i-${i}`]"
             @tap="pickTask(t.id)"
           >
             <text class="queue-n mono">{{ i + 1 }}</text>
@@ -333,8 +335,9 @@ onUnmounted(() => {
             </view>
             <text v-if="t.pri === 'high'" class="pick-pri">优先</text>
           </view>
-          <view v-if="openTasks.length === 0" class="empty">
-            <text>还没有未完成的任务。</text>
+          <view v-if="openTasks.length === 0" class="empty fb-empty">
+            <text class="fb-empty-icon">◷</text>
+            <text>选择「自由专注」，不用关联任务也能计时。</text>
           </view>
         </scroll-view>
       </view>
@@ -368,16 +371,33 @@ onUnmounted(() => {
 }
 
 .ring {
+  position: relative;
   width: min(252px, 68vw);
   height: min(252px, 68vw);
   margin: 10px 0 4px;
   border-radius: 50%;
   display: grid;
   place-items: center;
+  background: var(--s3);
   box-shadow: 0 0 34px var(--acc-soft);
-  transition: background 280ms linear;
 }
+.ring-half { position: absolute; top: 0; width: 50%; height: 100%; overflow: hidden; }
+.ring-half.right { right: 0; }
+.ring-half.left { left: 0; }
+.ring-rotor {
+  position: absolute;
+  top: 0;
+  width: 200%;
+  height: 100%;
+  border: 9px solid var(--acc);
+  border-radius: 50%;
+  transition: transform 250ms linear;
+}
+.ring-half.right .ring-rotor { left: -100%; }
+.ring-half.left .ring-rotor { left: 0; }
 .ring-hole {
+  position: relative;
+  z-index: 1;
   width: 82%;
   height: 82%;
   border-radius: 50%;
@@ -423,7 +443,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  transition: background 160ms var(--ease-out), border-color 160ms var(--ease-out);
+  transition: transform 90ms ease-out, background 160ms var(--ease-out), border-color 160ms var(--ease-out);
 }
 .preset:active { transform: scale(0.97); }
 .preset.on {
@@ -578,6 +598,9 @@ onUnmounted(() => {
 }
 
 .empty {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   padding: 18px 14px;
   border-radius: var(--r-md);
   border: 1px dashed var(--bd);

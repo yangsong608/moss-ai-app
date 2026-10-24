@@ -155,21 +155,22 @@ onUnmounted(() => {
           <text class="nh-sub">上次检索 {{ lastFetchLabel }} · 离线可读 · 立即检索需连接设备</text>
           <text v-if="feedHint !== ''" class="nh-hint" :class="{ bad: feedWarn }">{{ feedHint }}</text>
         </view>
-        <view class="btn primary fetch" :class="{ busy: fetching }" @tap="fetchNow">
-          {{ fetching ? '检索中…' : '立即检索' }}
+        <view class="btn primary fetch" :class="{ busy: fetching }" :aria-busy="fetching" @tap="fetchNow">
+          <view v-if="fetching" class="fb-progress" aria-hidden="true"><view /><view /><view /></view>
+          <text>{{ fetching ? '检索中…' : '立即检索' }}</text>
         </view>
       </view>
 
       <scroll-view scroll-x class="chips" :show-scrollbar="false">
         <view class="chip-row">
-          <view class="chip" :class="{ on: filter === ALL }" @tap="setFilter(ALL)">
+          <view class="chip fb-press" :class="{ on: filter === ALL }" @tap="setFilter(ALL)">
             <text>全部</text>
             <text class="chip-n mono">{{ data.news.length }}</text>
           </view>
           <view
             v-for="t in topics"
             :key="t"
-            class="chip"
+            class="chip fb-press"
             :class="{ on: filter === t }"
             @tap="setFilter(t)"
           >
@@ -184,8 +185,8 @@ onUnmounted(() => {
         <text class="sect-n">{{ visibleNews.length }} 条</text>
       </view>
 
-      <view v-if="visibleNews.length > 0" class="news-grid">
-        <view v-for="n in visibleNews" :key="n.id" class="news-card">
+      <view v-if="visibleNews.length > 0" :key="filter" class="news-grid">
+        <view v-for="(n, index) in visibleNews" :key="n.id" class="news-card" :class="index < 8 ? `fb-stagger fb-i-${index}` : ''">
           <view class="nc-head">
             <text class="topic">{{ n.topic }}</text>
             <text class="nc-src">{{ n.source }}</text>
@@ -201,7 +202,8 @@ onUnmounted(() => {
         </view>
       </view>
 
-      <view v-else class="empty">
+      <view v-else class="empty fb-empty">
+        <text class="fb-empty-icon">▥</text>
         <text>这个订阅下暂时没有内容。</text>
         <text class="empty-hint">「立即检索」会把任务派给已连接的设备，回写后自动出现在这里。</text>
       </view>
@@ -314,9 +316,9 @@ onUnmounted(() => {
   border-radius: var(--r-md);
   background: var(--s1);
   border: 1px solid var(--bd);
-  transition: border-color 160ms var(--ease-out);
+  transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out);
 }
-.news-card:active { border-color: var(--bd-strong); }
+.news-card:active { transform: scale(0.99); }
 .nc-head {
   display: flex;
   align-items: center;

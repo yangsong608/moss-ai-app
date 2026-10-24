@@ -1,0 +1,123 @@
+/* 工作台统一操作反馈：动画只使用 transform / opacity。 */
+
+.fb-press,
+.dsh .btn,
+.dsh .qadd,
+.dsh .aadd,
+.dsh .new-btn,
+.dsh .done-btn {
+  transition: transform 90ms ease-out, opacity 120ms ease-out;
+}
+.fb-press:active,
+.fb-press.is-press,
+.dsh .btn:active,
+.dsh .btn.is-press,
+.dsh .qadd:active,
+.dsh .aadd:active,
+.dsh .new-btn:active,
+.dsh .done-btn:active { transform: scale(0.97); opacity: 0.96; }
+
+.fb-disabled,
+.fb-busy,
+.dsh .btn[disabled],
+.dsh .btn.is-disabled,
+.dsh .btn.busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.fb-busy:active,
+.fb-busy.is-press,
+.dsh .btn.busy:active,
+.dsh .btn.busy.is-press { transform: none; }
+.fb-progress { display: inline-flex; align-items: center; gap: 3px; margin-right: 7px; }
+.fb-progress > view,
+.fb-progress > i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: fb-dot 900ms ease-in-out infinite;
+}
+.fb-progress > :nth-child(2) { animation-delay: 120ms; }
+.fb-progress > :nth-child(3) { animation-delay: 240ms; }
+@keyframes fb-dot {
+  0%, 70%, 100% { opacity: 0.35; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
+}
+
+.fb-enter { animation: fb-enter 220ms ease-out both; }
+.fb-enter-card { animation: fb-enter 260ms var(--ease-out) both; }
+@keyframes fb-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fb-content-enter { animation: fb-content-enter 120ms ease-out both; }
+@keyframes fb-content-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fb-exit { animation: fb-exit 120ms ease-in both; }
+@keyframes fb-exit {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
+}
+
+.fb-empty { align-items: center; text-align: center; }
+.fb-empty-icon {
+  display: block;
+  color: var(--acc);
+  font-size: 24px;
+  line-height: 1;
+  animation: fb-breathe 1.6s ease-in-out infinite;
+}
+@keyframes fb-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+
+/* 只给前 8 条设置递进；后续条目立即显示，不做长列表动画。 */
+.fb-stagger { animation: fb-enter 220ms ease-out both; }
+.fb-stagger.fb-i-0 { animation-delay: 0ms; }
+.fb-stagger.fb-i-1 { animation-delay: 30ms; }
+.fb-stagger.fb-i-2 { animation-delay: 60ms; }
+.fb-stagger.fb-i-3 { animation-delay: 90ms; }
+.fb-stagger.fb-i-4 { animation-delay: 120ms; }
+.fb-stagger.fb-i-5 { animation-delay: 150ms; }
+.fb-stagger.fb-i-6 { animation-delay: 180ms; }
+.fb-stagger.fb-i-7 { animation-delay: 210ms; }
+
+/* 切换 lite 后立即停掉工作台全部 CSS 动效，保留静态状态与禁用反馈。 */
+.dsh.is-lite *,
+.dsh.is-lite *::before,
+.dsh.is-lite *::after {
+  animation: none !important;
+  transition: none !important;
+}
+.dsh.is-lite .fb-enter,
+.dsh.is-lite .fb-enter-card,
+.dsh.is-lite .fb-stagger,
+.dsh.is-lite .fb-content-enter,
+.dsh.is-lite .fb-exit,
+.dsh.is-lite .fb-progress > view,
+.dsh.is-lite .fb-progress > i { opacity: 1; transform: none; }
+.dsh.is-lite .fb-busy,
+.dsh.is-lite .btn.busy { opacity: 0.65; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh *,
+  .dsh *::before,
+  .dsh *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .dsh .fb-enter,
+  .dsh .fb-enter-card,
+  .dsh .fb-stagger,
+  .dsh .fb-content-enter,
+  .dsh .fb-exit,
+  .dsh .fb-progress > view,
+  .dsh .fb-progress > i { opacity: 1; transform: none; }
+  .dsh .fb-busy,
+  .dsh .btn.busy { opacity: 0.65; }
+}

@@ -94,6 +94,7 @@ onLaunch(() => {
 <style lang="scss">
 @import '@/styles/tokens.scss';
 @import '@/styles/moss.scss';
+@import '@/styles/feedback.scss';
 
 /**
  * 页面根背景。

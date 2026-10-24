@@ -1689,7 +1689,7 @@ watch(calView, (v) => {
         <view class="sp" />
         <view class="today-btn" @tap="goToday"><text>今天</text></view>
         <!-- 新建：标题 + 开始/结束（日期 + 时间，结束可跨天）都在这一个表单里 -->
-        <view class="new-btn" @tap="openCreate"><text>＋ 新建</text></view>
+        <view class="new-btn fb-press" @tap="openCreate"><text>＋ 新建</text></view>
         <view class="seg">
           <view class="seg-btn" :class="{ on: calView === 'week' }" @tap="setCalView('week')"><text>周</text></view>
           <view class="seg-btn" :class="{ on: calView === 'month' }" @tap="setCalView('month')"><text>月</text></view>
@@ -1714,7 +1714,7 @@ watch(calView, (v) => {
               </view>
             </view>
 
-            <view class="weekgrid">
+            <view :key="`week-${calView}-${anchor}`" class="weekgrid fb-content-enter">
               <view class="hourcol">
                 <view v-for="h in HOURS" :key="h" class="hl">
                   <text class="hl-t mono">{{ pad(h) }}:00</text>
@@ -1775,7 +1775,7 @@ watch(calView, (v) => {
       </view>
 
       <!-- 月视图 -->
-      <view v-else class="monthwrap">
+      <view v-else :key="`month-${calView}-${anchor}`" class="monthwrap fb-content-enter">
         <view class="mrow">
           <text v-for="w in WEEK_LABELS" :key="w" class="mhd">{{ w }}</text>
         </view>
@@ -1807,12 +1807,12 @@ watch(calView, (v) => {
       </view>
 
       <view class="card">
-        <view v-if="agenda.length === 0" class="aempty">这一天没有安排 · 在下面加一条</view>
+        <view v-if="agenda.length === 0" class="aempty fb-empty"><text class="fb-empty-icon">▦</text><text>在下方输入安排，选好时间后点「＋」</text></view>
         <view
-          v-for="a in agenda"
+          v-for="(a, index) in agenda"
           :key="a.id"
           class="agenda-item"
-          :class="{ done: a.done }"
+          :class="[{ done: a.done }, index < 8 ? `fb-stagger fb-i-${index}` : '']"
           @tap="openTask(a.id)"
         >
           <!-- 3px 状态色条：未开始 / 进行中 / 已完成一眼可分 -->
@@ -1842,7 +1842,7 @@ watch(calView, (v) => {
           <picker mode="time" :value="quickTime" @change="onPickTime">
             <view class="atime mono"><text>{{ quickTime }}</text></view>
           </picker>
-          <view class="aadd" @tap="quickAdd"><text class="aadd-g">＋</text></view>
+          <view class="aadd fb-press" :class="{ 'fb-disabled': quickTitle.trim() === '' }" :aria-disabled="quickTitle.trim() === ''" @tap="quickAdd"><text class="aadd-g">＋</text></view>
         </view>
       </view>
 
@@ -2239,8 +2239,8 @@ watch(calView, (v) => {
 .evbar.flash { animation: ev-flash 700ms var(--ease-out) 2; }
 
 @keyframes ev-flash {
-  0%, 100% { box-shadow: 0 0 0 0 var(--acc-soft); }
-  50% { box-shadow: 0 0 0 4px var(--acc-glow); }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(1.025); }
 }
 
 .et {
@@ -2352,8 +2352,8 @@ watch(calView, (v) => {
 .mcell.flash { animation: cell-flash 700ms var(--ease-out) 2; }
 
 @keyframes cell-flash {
-  0%, 100% { box-shadow: inset 0 0 0 0 var(--acc-soft); }
-  50% { box-shadow: inset 0 0 0 2px var(--acc); }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(0.96); }
 }
 
 .dn { font-size: 10px; color: var(--t2); }
@@ -2559,6 +2559,10 @@ watch(calView, (v) => {
 }
 
 .aempty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
   padding: 16px 4px;
   text-align: center;
   font-size: 10px;

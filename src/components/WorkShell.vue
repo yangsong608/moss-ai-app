@@ -9,7 +9,7 @@
  * 约定沿用 core/store 的皮肤与明暗；图标用文本字形（App 端内联 SVG 不稳）。
  */
 import { computed, onMounted } from 'vue'
-import { skinClass, themeClass, state } from '@/core/store'
+import { skinClass, themeClass, liteClass, state } from '@/core/store'
 import { workDevices, work, normalizeDevice, isLocalDomain } from '@/core/workbench'
 import { syncStatus } from '@/core/sync-queue'
 import { startAutoSync } from '@/core/sync-engine'
@@ -21,7 +21,7 @@ const props = defineProps<{
   sub?: string
 }>()
 
-const rootClass = computed(() => ['dsh', 'ws', skinClass.value, themeClass.value])
+const rootClass = computed(() => ['dsh', 'ws', skinClass.value, themeClass.value, liteClass.value])
 
 /** key 同时用于高亮；url 单独给（sessions 页不在同名目录） */
 const TABS = [
@@ -81,7 +81,7 @@ const syncText = computed(() => {
       <view
         v-for="t in tabs"
         :key="t.key"
-        class="ws-tab"
+        class="ws-tab fb-press"
         :class="{ on: props.active === t.key }"
         @tap="go(t)"
       >
@@ -105,10 +105,10 @@ const syncText = computed(() => {
             <view class="ws-dot" />
             <text>{{ syncText }}</text>
           </view>
-          <view class="ws-devbtn" @tap="goDevices" title="设备与配对">
+          <view class="ws-devbtn fb-press" @tap="goDevices" title="设备与配对">
             <text>▣</text>
           </view>
-          <view class="ws-theme" @tap="toggleTheme">
+          <view class="ws-theme fb-press" @tap="toggleTheme">
             <text>{{ state.light ? '☾' : '☀' }}</text>
           </view>
         </view>
@@ -116,7 +116,7 @@ const syncText = computed(() => {
 
       <!-- 内容 -->
       <scroll-view scroll-y class="ws-body">
-        <view class="ws-inner">
+        <view :key="props.active" class="ws-inner fb-content-enter">
           <slot />
         </view>
       </scroll-view>
@@ -155,6 +155,13 @@ const syncText = computed(() => {
   min-width: 0;
 }
 .ws-tab.on { color: var(--acc); }
+.ws-tab {
+  border-radius: var(--r-md);
+  transition: color 160ms ease-out, background-color 160ms ease-out, transform 90ms ease-out;
+}
+.ws-sync, .ws-dot { transition: opacity 160ms ease-out, transform 160ms ease-out; }
+.ws-sync.off .ws-dot { transform: scale(0.85); opacity: 0.7; }
+.ws-sync.alert .ws-dot { transform: scale(1.15); }
 .ws-glyph { font-size: 14px; line-height: 1; }
 .ws-label { font-size: 9.5px; letter-spacing: 0.01em; white-space: nowrap; }
 .ws-tab.on .ws-label { font-weight: 600; }
