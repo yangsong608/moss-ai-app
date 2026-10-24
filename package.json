@@ -15,7 +15,8 @@
     "test:sync": "node scripts/sync-adapter-test.mjs",
     "test:ai-dispatch": "node scripts/ai-dispatch-test.mjs",
     "test:ai-context": "node scripts/ai-context-test.mjs",
-    "check": "npm run typecheck && npm run test:protocol && npm run test:sync && npm run test:ai-dispatch && npm run test:ai-context && npm run build:h5 && npm run smoke",
+    "test:lunar": "node scripts/lunar-test.mjs",
+    "check": "npm run typecheck && npm run test:protocol && npm run test:sync && npm run test:ai-dispatch && npm run test:ai-context && npm run test:lunar && npm run build:h5 && npm run smoke",
     "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {

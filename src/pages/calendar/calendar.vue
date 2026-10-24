@@ -55,6 +55,8 @@ import {
   type Task,
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import { lunarDayLabel } from '@/core/lunar'
+import { state } from '@/core/store'
 
 const { data } = useWork()
 
@@ -604,8 +606,10 @@ function spanRange(span: { start: number; end: number }): string {
 const agenda = computed<AgendaItem[]>(() => {
   const iso = anchor.value
   const dayStart = new Date(`${iso}T00:00:00`).getTime()
-  // 与「今天」页同源：覆盖到这一天的任务（含跨天）全部出现
-  const list = tasksOnDay(data.value.tasks, iso).filter((t) => !(t.done && allDay(t)))
+  // 与「今天」页同源：覆盖到这一天的任务（含跨天 + 全天）**一次性全部列出**，不再逐条翻页。
+  //   今天：只看还没做完的（今天的重点是待办，已完成的收起来）；
+  //   其它日期：过去用来回顾、未来用来预排，全部任务都列，已完成的靠 .done 弱化并带 ✓。
+  const list = tasksOnDay(data.value.tasks, iso).filter((t) => (iso === TODAY ? !t.done : true))
   const rank = (t: Task): number => {
     const span = taskSpan(t)
     if (span === undefined) return 24 * 60 + 3 // 未定时排最后
@@ -641,6 +645,12 @@ const agenda = computed<AgendaItem[]>(() => {
 const agendaTitle = computed(() =>
   anchor.value === TODAY ? '今日安排' : `${md(anchor.value)} · ${weekdayOf(anchor.value)}`,
 )
+
+/** 卡片头部的农历（如 `九月十六`）；超出农历表范围时为空串，头部直接不渲染 */
+const lunarLabel = computed(() => {
+  const [y, m, d] = parts(anchor.value)
+  return lunarDayLabel(new Date(y, m - 1, d))
+})
 
 const nowY = computed(() => {
   const d = nowTick.value
@@ -698,6 +708,77 @@ function selectDate(iso: string): void {
   haptic('light')
 }
 
+/* ── 按天翻页：左右箭头 + 横向滑动 ──────────────────────────────── */
+
+/** 翻页动画方向：prev 从右进来、next 从左进来；空串 = 没有动画 */
+const pageDir = ref<'' | 'prev' | 'next'>('')
+/** 列表 key：每次翻页 +1，强制重建内容让入场动画从第一帧开始 */
+const pageKey = ref(0)
+let pageTimer: ReturnType<typeof setTimeout> | undefined
+/** 横向滑动判定阈值（px）：超过它且横向大于纵向才算翻页 */
+const SWIPE_MIN = 40
+
+/** 减少动效：lite 模式或系统 prefers-reduced-motion 时直接切换，不播翻页动画 */
+function skipPageAnim(): boolean {
+  if (state.lite) return true
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+}
+
+/** 上一个（delta = -1）/ 下一个（delta = +1）自然日：列表、周/月高亮、时间轴一起跟着 anchor 走 */
+function pageDay(delta: number): void {
+  if (delta === 0) return
+  anchor.value = addDays(anchor.value, delta)
+  pageKey.value += 1
+  if (pageTimer !== undefined) {
+    clearTimeout(pageTimer)
+    pageTimer = undefined
+  }
+  if (skipPageAnim()) {
+    pageDir.value = ''
+  } else {
+    pageDir.value = delta < 0 ? 'prev' : 'next'
+    /*
+     * 动画结束就摘掉 class。keyframes 的收尾已经写 `transform: none`（不写
+     * translateX(0)：`animation-fill-mode: both` 会把它留在元素上，让这个节点
+     * 成为 position: fixed 后代的包含块，弹层就会相对整页定位——本项目踩过）。
+     * 摘 class 是第二道保险：动画一旦结束，这个包裹层上不留任何 transform。
+     */
+    pageTimer = setTimeout(() => {
+      pageDir.value = ''
+      pageTimer = undefined
+    }, 260)
+  }
+  if (calView.value === 'week') focusSelectedDay()
+  haptic('light')
+}
+
+/* 横向滑动翻页：只是「记录起点 → 抬手算位移」，不拦截页面纵向滚动。 */
+let swipeFrom: { x: number; y: number } | null = null
+/** 滑动后短时间吞掉列表项的 tap：否则滑一下会顺手把任务详情打开 */
+let swipeTapUntil = 0
+
+function onAgendaSwipeStart(e: any): void {
+  swipeFrom = pointOf(e)
+}
+
+function onAgendaSwipeEnd(e: any): void {
+  const from = swipeFrom
+  swipeFrom = null
+  if (from === null) return
+  const to = pointOf(e)
+  if (to === null) return
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) <= Math.abs(dy)) return
+  swipeTapUntil = Date.now() + 350
+  // 手指往左滑 = 看后一天（内容从左进来），往右滑 = 看前一天（从右进来）
+  pageDay(dx < 0 ? 1 : -1)
+}
+
+function onAgendaSwipeCancel(): void {
+  swipeFrom = null
+}
+
 function pickMonthDay(iso: string): void {
   anchor.value = iso
   calView.value = 'week'
@@ -705,6 +786,11 @@ function pickMonthDay(iso: string): void {
 }
 
 function openTask(id: string): void {
+  // 先算滑动：横滑翻页之后浏览器还会补一次 click，不能让它顺手打开任务详情。
+  if (Date.now() < swipeTapUntil) {
+    swipeTapUntil = 0
+    return
+  }
   // 长按 / 按住之后平台多半还会补一次 tap：吃掉它，否则菜单刚弹出就被详情盖住。
   if (isSwallowedTap(id)) {
     swallowId = ''
@@ -1642,6 +1728,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer !== undefined) clearInterval(timer)
   if (flashTimer !== undefined) clearTimeout(flashTimer)
+  if (pageTimer !== undefined) clearTimeout(pageTimer)
   clearHold()
   detachMouse()
   stopReminderPoll()
@@ -1799,34 +1886,53 @@ watch(calView, (v) => {
         <text class="mhint">{{ movingId !== '' ? '点任意日期把任务移过去' : '点日期数字跳到那一周 · 点空白处新建' }}</text>
       </view>
 
-      <!-- 选中日期的安排 -->
+      <!-- 选中日期的安排：卡片头部（标题 + 农历 + 前后一天） -->
       <view class="sect">
+        <view class="daynav fb-press" role="button" aria-label="前一天" @tap="pageDay(-1)"><text class="dnav-g">‹</text></view>
         <text class="st">{{ agendaTitle }}</text>
+        <!-- 农历紧跟公历日期；超出农历表范围时 lunarLabel 为空串，整段不渲染 -->
+        <text v-if="lunarLabel !== ''" class="alunar">{{ lunarLabel }}</text>
         <text class="mono sn">{{ agenda.length }} 项</text>
         <view class="line" />
+        <view class="daynav fb-press" role="button" aria-label="后一天" @tap="pageDay(1)"><text class="dnav-g">›</text></view>
       </view>
 
       <view class="card">
-        <view v-if="agenda.length === 0" class="aempty fb-empty"><text class="fb-empty-icon">▦</text><text>在下方输入安排，选好时间后点「＋」</text></view>
+        <!-- 翻页只包裹列表本体（不含下方输入框，避免输入被重建）：
+             换 key 重建 + 入场动画，收尾 transform: none（不留 fixed 包含块）。 -->
         <view
-          v-for="(a, index) in agenda"
-          :key="a.id"
-          class="agenda-item"
-          :class="[{ done: a.done }, index < 8 ? `fb-stagger fb-i-${index}` : '']"
-          @tap="openTask(a.id)"
+          :key="pageKey"
+          class="agenda-page"
+          :class="pageDir !== '' ? 'page-' + pageDir : ''"
+          @touchstart="onAgendaSwipeStart"
+          @touchend="onAgendaSwipeEnd"
+          @touchcancel="onAgendaSwipeCancel"
         >
-          <!-- 3px 状态色条：未开始 / 进行中 / 已完成一眼可分 -->
-          <view class="bar" :style="'background:' + a.st" />
-          <view class="abody">
-            <text class="at mono">
-              <text>{{ a.range }}</text>
-              <text v-if="a.cross" class="across"> · 跨天</text>
-              <text> · {{ a.dev }}</text>
-            </text>
-            <text class="an"><text v-if="a.bell" class="bell">🔔 </text>{{ a.title }}</text>
+          <view v-if="agenda.length === 0" class="aempty fb-empty"><text class="fb-empty-icon">▦</text><text>在下方输入安排，选好时间后点「＋」</text></view>
+          <view
+            v-for="(a, index) in agenda"
+            :key="a.id"
+            class="agenda-item"
+            :class="[{ done: a.done }, index < 8 ? `fb-stagger fb-i-${index}` : '']"
+            @tap="openTask(a.id)"
+          >
+            <!-- 3px 状态色条：未开始 / 进行中 / 已完成一眼可分 -->
+            <view class="bar" :style="'background:' + a.st" />
+            <view class="abody">
+              <text class="at mono">
+                <text>{{ a.range }}</text>
+                <text v-if="a.cross" class="across"> · 跨天</text>
+                <text> · {{ a.dev }}</text>
+              </text>
+              <text class="an">
+                <text v-if="a.done" class="acheck">✓</text>
+                <text v-if="a.bell" class="bell">🔔 </text>
+                <text class="atitle">{{ a.title }}</text>
+              </text>
+            </view>
+            <text class="achip" :style="'color:' + a.st + ';border-color:' + a.st">{{ a.stLabel }}</text>
+            <text class="ago">›</text>
           </view>
-          <text class="achip" :style="'color:' + a.st + ';border-color:' + a.st">{{ a.stLabel }}</text>
-          <text class="ago">›</text>
         </view>
 
         <view class="addrow">
@@ -2486,6 +2592,30 @@ watch(calView, (v) => {
   text-transform: uppercase;
 }
 
+/* 前一天 / 后一天：两个小圆角方块，贴在安排标题左右 */
+.daynav {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--s1);
+  color: var(--t2);
+}
+
+.daynav:active { background: var(--s2); color: var(--acc); }
+.dnav-g { font-size: 13px; line-height: 1; }
+
+/* 农历：与公历日期同一行，弱于标题但比灰字更亮一点 */
+.alunar {
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--acc);
+  opacity: 0.85;
+}
+
 .sn { font-size: 9px; color: var(--t3); }
 .line { flex: 1; height: 1px; background: var(--bd); }
 
@@ -2494,6 +2624,24 @@ watch(calView, (v) => {
   border-radius: var(--r-lg);
   background: var(--s1);
   padding: 2px 12px 10px;
+}
+
+/* 按天翻页：内容位移 24px + 淡入，240ms（要求 220–260ms）。
+   收尾必须是 `transform: none`：若写成 translateX(0)，`animation-fill-mode: both`
+   会把它留在元素上，令这个包裹层成为 position: fixed 后代的包含块，
+   页面内弹层就会相对整页而不是视口定位（本项目刚修过同类 bug）。 */
+.agenda-page { display: block; }
+.agenda-page.page-prev { animation: agenda-page-prev 240ms var(--ease-out) both; }
+.agenda-page.page-next { animation: agenda-page-next 240ms var(--ease-out) both; }
+
+@keyframes agenda-page-prev {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes agenda-page-next {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: none; }
 }
 
 .agenda-item {
@@ -2547,9 +2695,17 @@ watch(calView, (v) => {
   color: var(--t1);
 }
 
-.agenda-item.done .an {
-  color: var(--t3);
-  text-decoration: line-through;
+.agenda-item.done .an { color: var(--t3); }
+
+/* 删除线只打在标题上：整行 .an 带删除线会把前面的 ✓ 也划掉 */
+.agenda-item.done .atitle { text-decoration: line-through; }
+
+/* 已完成标记：非今天的列表会显示已完成任务，✓ 是它区别于待办的唯一硬标记 */
+.acheck {
+  display: inline-block;
+  margin-right: 4px;
+  font-weight: 700;
+  color: var(--st-done);
 }
 
 .ago {
