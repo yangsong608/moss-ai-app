@@ -590,7 +590,6 @@ interface DragState {
   targetIso: string
   targetHour: number
   moved: boolean
-  pointer: 'touch' | 'mouse'
 }
 
 const drag = ref<DragState | null>(null)
@@ -667,7 +666,7 @@ function clampInt(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v))
 }
 
-function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number, pointer: 'touch' | 'mouse'): void {
+function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number): void {
   if (movingId.value !== id) return
   const startCol = weekDays.value.findIndex((d) => d.iso === iso)
   if (startCol < 0) return
@@ -692,7 +691,6 @@ function startDrag(id: string, iso: string, ev: CalEvent, x: number, y: number, 
     targetIso: iso,
     targetHour: clampInt(HOUR_FROM + Math.floor(ev.top / HOUR_H), HOUR_FROM, HOUR_TO - 1),
     moved: false,
-    pointer,
   }
   haptic('medium')
 }
@@ -766,7 +764,7 @@ function barTouchStart(id: string, iso: string, ev: CalEvent, e: any): void {
   if (movingId.value === id) {
     clearHold()
     if (drag.value !== null) return
-    startDrag(id, iso, ev, p.x, p.y, 'touch')
+    startDrag(id, iso, ev, p.x, p.y)
     return
   }
   measureColumns()
@@ -819,7 +817,7 @@ function barMouseDown(id: string, iso: string, ev: CalEvent, e: any): void {
   if (p === null) return
   if (movingId.value === id) {
     if (drag.value !== null) return
-    startDrag(id, iso, ev, p.x, p.y, 'mouse')
+    startDrag(id, iso, ev, p.x, p.y)
     attachMouse()
     return
   }
