@@ -21,16 +21,27 @@ const VIEWPORTS = [
   ['tablet-portrait', 820, 1180],
   ['tablet-landscape', 1280, 800],
 ]
+// 关键视图（hash 直达，便于逐屏评审）
+const VIEWS = [
+  ['today', ''],
+  ['board', '#today-board'],
+  ['calendar', '#calendar'],
+  ['notes', '#notes'],
+  ['focus', '#focus'],
+  ['news', '#news'],
+]
 
 mkdirSync(resolve(HERE, 'shots'), { recursive: true })
 for (const [name, w, h] of VIEWPORTS) {
+  for (const [view, hash] of (name === 'phone' ? VIEWS : [['today', ''], ['board', '#today-board'], ['calendar', '#calendar']])) {
   execFileSync(CHROME, [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-software-rasterizer',
     '--use-gl=disabled', '--disable-breakpad', '--no-first-run', '--hide-scrollbars',
     '--user-data-dir=/tmp/chrome-moss-profile',
-    `--screenshot=${resolve(HERE, 'shots', `${name}.png`)}`,
+    `--screenshot=${resolve(HERE, 'shots', `${name}-${view}.png`)}`,
     `--window-size=${w},${h}`,
-    `file://${resolve(HERE, 'index.html')}`,
+    `file://${resolve(HERE, 'index.html')}${hash}`,
   ], { stdio: ['ignore', 'ignore', 'ignore'] })
-  console.log(`${name} ${w}×${h} → shots/${name}.png`)
+  console.log(`${name}-${view} ${w}×${h} → shots/${name}-${view}.png`)
+  }
 }
