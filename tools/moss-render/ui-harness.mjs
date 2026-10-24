@@ -429,4 +429,72 @@ function parseViewport(text) {
   return { width: Number(m[1]), height: Number(m[2]), deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 }
 
-await main()
+// 只在直接运行时截图；被 shot.mjs / slot.mjs 以 --mock 引入时只借用替身与假数据。
+const direct = process.argv[1]?.replace(/\\/g, '/').endsWith('/ui-harness.mjs') ?? false
+if (direct) await main()
+
+/** 其它脚本复用：替身 WebSocket、假数据、以及"已配对一台机器"的落盘种子。 */
+export const MOCK = { DEVICES, WORKSPACES, SESSIONS, MODELS, HISTORY, QUEUE, CHANGES, HUNKS, now }
+export { installMockSocket }
+
+/**
+ * 替身要取的数据包（键名必须和 installMockSocket 里的 window.__MOCK__.* 一致）。
+ * 注意是 devices/workspaces/sessions 小写，别直接传 MOCK（那是给 Node 侧读的）。
+ *
+ * opts：
+ *   needsAuth  加一台"待确认配对"的机器 → 首页出现 .pairing 行
+ *   empty      清空设备表            → 首页出现 .empty 空态
+ */
+export function mockPayload(opts = {}) {
+  const devices = [...DEVICES]
+  if (opts.needsAuth) {
+    devices.push({
+      deviceId: 'dev_c', name: '工作室 iMac', platform: 'darwin', role: 'viewer',
+      conn: 'needs-auth', createdAt: now - 600_000, lastSeen: now - 60_000,
+      endpoint: { url: 'ws://192.168.1.42:7443/dshlink', kind: 'lan' },
+    })
+  }
+  return {
+    devices: opts.empty ? [] : devices,
+    workspaces: WORKSPACES,
+    sessions: SESSIONS,
+    models: MODELS,
+    history: HISTORY,
+    queue: QUEUE,
+    changes: CHANGES,
+    hunks: HUNKS,
+    tree: {
+      '': [{ name: 'app', dir: true }, { name: 'docs', dir: true }, { name: 'README.md', dir: false }],
+      app: [{ name: 'core', dir: true }],
+      'app/core': [{ name: 'upload.ts', dir: false }],
+      docs: [{ name: '05-上传通道.md', dir: false }],
+    },
+    files: {
+      'README.md': { path: 'README.md', kind: 'markdown', size: 812, text: '# MOSS Link\n\n把 dsh 带到手机上。\n' },
+    },
+  }
+}
+
+/**
+ * 让首页/会话页直接进入"已配对 + 已连接"状态。
+ * 必须在 page.evaluateOnNewDocument 里调用（页面脚本执行前）。
+ */
+export function seedPaired({ skin = 'moss', light = false, empty = false } = {}) {
+  try {
+    localStorage.setItem('dsh-link/prefs', JSON.stringify({ skinMode: skin, light, lite: false }))
+    if (empty) {
+      // 清掉缓存里的设备表，首页才会走"还没有电脑"的空态
+      localStorage.removeItem('dsh-link/devices')
+      return
+    }
+    localStorage.setItem('dsh-link/devices', JSON.stringify({
+      activeId: 'dev_a',
+      devices: [{
+        deviceId: 'dev_a', name: 'MacBook Pro', platform: 'darwin', role: 'operator',
+        createdAt: Date.now() - 86_400_000 * 3, lastSeen: Date.now() - 40_000,
+        endpoint: { url: 'ws://mock:7443/dshlink', kind: 'lan' },
+      }],
+    }))
+    localStorage.setItem('dsh-link/token/dev_a', 'mock-token')
+  } catch { /* 忽略 */ }
+}

@@ -9,7 +9,9 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import MossDot from '@/components/moss/MossDot.vue'
+import MossTex from '@/components/moss/MossTex.vue'
 import MossBadge from '@/components/moss/MossBadge.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import { state, type SessionRow } from '@/core/store'
 import { haptic } from '@/core/haptic'
@@ -373,10 +375,10 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
       <view class="head-r">
         <text v-if="!searching" class="mono t3">{{ state.devices.length }} 台机器</text>
         <view class="search-btn" @tap="toggleSearch">
-          <view class="ico-search" :class="{ on: searching }" />
+          <MossIcon class="ico-search" :class="{ on: searching }" name="search" :size="16" />
         </view>
         <view class="search-btn" @tap="newSession">
-          <view class="ico-plus" />
+          <MossIcon class="ico-plus" name="plus" :size="16" />
         </view>
         <!-- 角标放在标题右侧：一眼知道"有没有东西在跑"，不用逐条看状态 -->
         <MossBadge :size="24" :working="anyRunning" :glow="!state.lite" />
@@ -432,6 +434,7 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
               @tap="openChat(r)"
               @longpress="sessionMenu(r)"
             >
+              <MossTex name="srow" />
               <view class="srow-l">
                 <MossDot
                   :status="
@@ -527,43 +530,10 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
 .search-btn:active { background: var(--s2); }
 
 /* 放大镜：圆 + 柄，纯 CSS */
-.ico-search {
-  position: relative;
-  width: 15px;
-  height: 15px;
-  border: 1.8px solid var(--t2);
-  border-radius: 50%;
-}
-.ico-search.on { border-color: var(--acc); }
-.ico-search.on::after { background: var(--acc); }
-
-.ico-search::after {
-  content: '';
-  position: absolute;
-  right: -4px;
-  bottom: -3px;
-  width: 6px;
-  height: 1.8px;
-  background: var(--t2);
-  transform: rotate(45deg);
-  border-radius: 1px;
-}
-
-/* 加号：两条线交叉 */
-.ico-plus {
-  position: relative;
-  width: 15px;
-  height: 15px;
-}
-.ico-plus::before,
-.ico-plus::after {
-  content: '';
-  position: absolute;
-  background: var(--acc);
-  border-radius: 1px;
-}
-.ico-plus::before { left: 6.5px; top: 1px; width: 2px; height: 13px; }
-.ico-plus::after { top: 6.5px; left: 1px; height: 2px; width: 13px; }
+/* 图标换成预渲染线稿后，只剩"未激活态压透明度"这一件事 */
+.ico-search { opacity: 0.72; transition: opacity 140ms ease-out; }
+.ico-search.on { opacity: 1; }
+.ico-plus { opacity: 0.85; }
 
 .empty-btn {
   margin: 14px auto 0;
@@ -631,6 +601,8 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
 }
 
 .srow {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -642,6 +614,10 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
   background: var(--s1);
 }
 
+/* 纹理层在 .srow 底下铺满，内容要抬到它上面 */
+.srow-l,
+.srow-r { position: relative; z-index: 1; }
+
 .srow:active { transform: scale(0.99); background: var(--s2); }
 
 .srow.waiting {
@@ -650,7 +626,14 @@ function goTab(tab: 'devices' | 'sessions' | 'me'): void {
 }
 
 .srow-l { display: flex; gap: 9px; flex: 1; min-width: 0; padding-top: 3px; }
-.srow-body { flex: 1; min-width: 0; }
+/*
+ * 右边留出 58px 给图形。
+ *
+ * 不加这段留白会踩坑：标题是 nowrap + ellipsis，长标题会一直顶到
+ * .srow-body 的右边界（实测 x1 = 0.841），图形再怎么往右挪都会压到字。
+ * 与其靠"恰好没顶到"赌标题长度，不如把这块位置让出来。
+ */
+.srow-body { flex: 1; min-width: 0; padding-right: 58px; }
 
 .st {
   display: block;

@@ -17,6 +17,8 @@
 import { computed, onUnmounted, reactive, ref } from 'vue'
 import { onLoad, onUnload } from '@dcloudio/uni-app'
 import MossMarkdown from '@/components/MossMarkdown.vue'
+import MossPageBg from '@/components/moss/MossPageBg.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import {
   addNotebook,
@@ -445,14 +447,15 @@ onUnmounted(() => {
 
 <template>
   <view :class="rootClass">
+    <MossPageBg nav="none" />
     <!-- 顶部：返回 / 保存状态 / 收藏 / 预览·编辑 -->
     <view class="ne-top safe-top">
-      <view class="ne-back" @tap="back"><text>‹</text></view>
+      <view class="ne-back" @tap="back"><MossIcon name="chev" :size="17" flip /></view>
       <text v-if="!missing" class="ne-save" :class="saveState">{{ saveLabel }}</text>
       <text v-else class="ne-save">笔记</text>
       <view class="sp" />
       <view v-if="!missing" class="ne-star" :class="{ on: isFav }" @tap="toggleFav">
-        <text>{{ isFav ? '★' : '☆' }}</text>
+        <MossIcon name="star" :size="15" :fill="isFav" />
       </view>
       <view v-if="!missing" class="seg">
         <view class="seg-i" :class="{ on: mode === 'preview' }" @tap="setMode('preview')">
@@ -542,11 +545,11 @@ onUnmounted(() => {
               <text class="ne-act-tx">问 AI</text>
             </view>
             <view class="ne-act" @tap="openMove">
-              <text class="ne-act-ic">⇄</text>
+              <MossIcon class="ne-act-ic" name="sync" :size="15" />
               <text class="ne-act-tx">移动</text>
             </view>
             <view class="ne-act danger" @tap="confirmDelete">
-              <text class="ne-act-ic">✕</text>
+              <MossIcon class="ne-act-ic" name="close" :size="14" />
               <text class="ne-act-tx">删除</text>
             </view>
           </view>
@@ -778,11 +781,11 @@ onUnmounted(() => {
   background: var(--s2);
   border-color: var(--bd);
 }
-.ne-act-ic { font-size: 15px; line-height: 1; color: var(--t2); }
+.ne-act-ic { flex: none; }
 .ne-act-tx { font-size: 10px; line-height: 1; letter-spacing: 0.01em; }
 /* 删除只换文字色，不给实底：危险色已经足够，填充会把注意力从主操作上抢走 */
-.ne-act.danger,
-.ne-act.danger .ne-act-ic { color: var(--danger); }
+.ne-act.danger { color: var(--danger); }
+.ne-act.danger .ne-act-ic { opacity: 0.85; }
 .ne-act.danger:active {
   background: var(--danger-soft);
   border-color: var(--danger-bd);

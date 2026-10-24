@@ -13,6 +13,7 @@ import PageShell from '@/components/PageShell.vue'
 import { state, skin, markUserPreference, type SkinMode } from '@/core/store'
 import { haptic } from '@/core/haptic'
 import MossSheet from '@/components/MossSheet.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 
 const skins: { key: SkinMode; name: string; desc: string; dot: string }[] = [
   // desc 必须说人话，而且要说得准：
@@ -150,12 +151,12 @@ function about(): void {
             <text class="opt-n">MOSS LINK 0.1.0</text>
             <text class="opt-d t3">dsh-link · 宿主插件 0.1.0</text>
           </view>
-          <text class="mono t3">›</text>
+          <MossIcon class="opt-chev" name="chev" :size="14" />
         </view>
 
         <!-- 品牌区：把 MOSS 主体放进来，让"关于"页有可识别的主体而不是纯文字 -->
         <view class="brand-card">
-          <image class="brand-img" src="/static/moss/hero.webp" mode="aspectFit" />
+          <view class="brand-img"><MossIcon name="hero" :size="62" /></view>
           <view class="brand-body">
             <text class="brand-h mark mono">MOSS<span class="brand-acc">LINK</span></text>
             <text class="brand-d t3">把 dsh 带到手机上</text>
@@ -193,10 +194,11 @@ function about(): void {
   width: 76px;
   height: 76px;
   flex: none;
+  display: grid;
+  place-items: center;
   border-radius: 14px;
   background: radial-gradient(circle at 40% 30%, var(--s3), var(--s1) 70%);
   border: 1px solid var(--bd);
-  padding: 6px;
   box-sizing: border-box;
 }
 .brand-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

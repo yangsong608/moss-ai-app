@@ -14,6 +14,8 @@ import { workDevices, work, normalizeDevice, isLocalDomain } from '@/core/workbe
 import { syncStatus } from '@/core/sync-queue'
 import { startAutoSync } from '@/core/sync-engine'
 import { haptic } from '@/core/haptic'
+import MossPageBg from './moss/MossPageBg.vue'
+import MossIcon from './moss/MossIcon.vue'
 
 const props = defineProps<{
   active: 'today' | 'calendar' | 'notes' | 'focus' | 'news' | 'sessions' | 'mine'
@@ -25,13 +27,13 @@ const rootClass = computed(() => ['dsh', 'ws', skinClass.value, themeClass.value
 
 /** key 同时用于高亮；url 单独给（sessions 页不在同名目录） */
 const TABS = [
-  { key: 'today', label: '今天', glyph: '✓', url: '/pages/today/today' },
-  { key: 'calendar', label: '日历', glyph: '▦', url: '/pages/calendar/calendar' },
-  { key: 'notes', label: '笔记', glyph: '▤', url: '/pages/notes/notes' },
-  { key: 'focus', label: '专注', glyph: '◷', url: '/pages/focus/focus' },
-  { key: 'news', label: '资讯', glyph: '▥', url: '/pages/news/news' },
-  { key: 'sessions', label: '会话', glyph: '❯', url: '/pages/sessions/sessions' },
-  { key: 'mine', label: '我的', glyph: '☰', url: '/pages/mine/mine' },
+  { key: 'today', label: '今天', icon: 'check', url: '/pages/today/today' },
+  { key: 'calendar', label: '日历', icon: 'cal', url: '/pages/calendar/calendar' },
+  { key: 'notes', label: '笔记', icon: 'note', url: '/pages/notes/notes' },
+  { key: 'focus', label: '专注', icon: 'clock', url: '/pages/focus/focus' },
+  { key: 'news', label: '资讯', icon: 'feed', url: '/pages/news/news' },
+  { key: 'sessions', label: '会话', icon: 'chat', url: '/pages/sessions/sessions' },
+  { key: 'mine', label: '我的', icon: 'menu', url: '/pages/mine/mine' },
 ] as const
 
 const local = computed(() => isLocalDomain())
@@ -76,6 +78,9 @@ const syncText = computed(() => {
 
 <template>
   <view :class="rootClass">
+    <!-- 整页环境背景：头 / 中 / 尾三层，待在一切内容下面 -->
+    <MossPageBg nav="shell" />
+
     <!-- 导航（手机底部 / 平板左侧） -->
     <view class="ws-nav">
       <view
@@ -85,7 +90,7 @@ const syncText = computed(() => {
         :class="{ on: props.active === t.key }"
         @tap="go(t)"
       >
-        <text class="ws-glyph">{{ t.glyph }}</text>
+        <MossIcon class="ws-ico" :name="t.icon" :size="22" />
         <text class="ws-label">{{ t.label }}</text>
       </view>
     </view>
@@ -106,10 +111,10 @@ const syncText = computed(() => {
             <text>{{ syncText }}</text>
           </view>
           <view class="ws-devbtn fb-press" @tap="goDevices" title="设备与配对">
-            <text>▣</text>
+            <MossIcon name="device" :size="18" />
           </view>
           <view class="ws-theme fb-press" @tap="toggleTheme">
-            <text>{{ state.light ? '☾' : '☀' }}</text>
+            <MossIcon :name="state.light ? 'moon' : 'sun'" :size="18" />
           </view>
         </view>
       </view>
@@ -162,7 +167,9 @@ const syncText = computed(() => {
 .ws-sync, .ws-dot { transition: opacity 160ms ease-out, transform 160ms ease-out; }
 .ws-sync.off .ws-dot { transform: scale(0.85); opacity: 0.7; }
 .ws-sync.alert .ws-dot { transform: scale(1.15); }
-.ws-glyph { font-size: 14px; line-height: 1; }
+/* 图标是预上色的图，不吃 color；未选中态用透明度区分，选中态恢复满浓度 */
+.ws-ico { opacity: 0.5; transition: opacity 160ms ease-out; }
+.ws-tab.on .ws-ico { opacity: 1; }
 .ws-label { font-size: 9.5px; letter-spacing: 0.01em; white-space: nowrap; }
 .ws-tab.on .ws-label { font-weight: 600; }
 
@@ -198,11 +205,11 @@ const syncText = computed(() => {
 .ws-sync.alert .ws-dot { background: var(--warn); }
 .ws-devbtn {
   width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center;
-  background: var(--s1); border: 1px solid var(--bd); font-size: 14px; color: var(--t2);
+  background: var(--s1); border: 1px solid var(--bd); color: var(--t2);
 }
 .ws-theme {
   width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center;
-  background: var(--s1); border: 1px solid var(--bd); font-size: 15px; color: var(--t2);
+  background: var(--s1); border: 1px solid var(--bd); color: var(--t2);
 }
 
 
@@ -236,7 +243,6 @@ const syncText = computed(() => {
     gap: 3px;
   }
   .ws-tab.on { background: var(--acc-soft); }
-  .ws-glyph { font-size: 16px; }
   .ws-label { font-size: 10.5px; }
 
   .ws-main { order: 1; }

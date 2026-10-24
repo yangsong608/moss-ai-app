@@ -19,8 +19,10 @@
  * 否则图和令牌会对不上（gen-tex.py 里的 THEMES 是同一份真相的副本）。
  */
 
-/* 纹理资源路径。uni-app 的静态资源在 H5 与 App 端都从根路径取。 */
-$tex-root: '/static/moss/tex';
+/*
+ * 纹理图片本体在 src/static/moss/tex/，路径由 MossTex 组件用 JS 算
+ * （CSS 变量在 <image> 的 src 上不可用）。这里只放浓度令牌。
+ */
 
 .dsh {
   /* ── MOSS / 深色（默认） ─────────────────────────────────────────── */
@@ -56,28 +58,47 @@ $tex-root: '/static/moss/tex';
   --veil-opacity: 0.38;
   --glow-on: 1;
 
-  /* ── 纹理背景（图片本体在静态目录，这里只放引用与强度）─────────────
+  /* ── 纹理背景 ────────────────────────────────────────────────────────
    *
-   * 三个角色对应三类卡片：
-   *   --tex-card  普通卡片（笔记 / 资讯 / 看板列 / 设置组）
-   *   --tex-hero  主视觉卡（今天页大日期卡 / 我的页控制台卡 / 设备页状态台）
-   *   --tex-amb   页面环境层（整页底纹）
+   * 纹理按**卡片类**出图（清单见 tools/moss-render/card_specs.py）：
+   * 每类卡片有自己的宽高比、自己的图案落位、自己的文字避让区，
+   * 同一张图套不同卡片会拉伸变形且图案会压到文字上。
+   *
+   * 这里只放**浓度**，图片路径由 MossTex 组件用 JS 算
+   * （CSS 变量在 <image> 的 src 上不可用 —— src 不是样式属性）。
    *
    * 强度不是烤进图片里的，而是由 --tex-*-op 控制：
-   * 同一张图要能被不同尺寸、不同底色的卡片复用，
-   * 强度烤进图片就只能一图一用，包体会翻倍。
+   * 换肤时只换一次 opacity，不必为每个主题重新解码图片。
    *
    * --tex-*-op 的取值不是随手定的：它由 tools/moss-render/check-tex.py
-   * 按「玻璃层盖在纹理上」的真实图层模型算出，约束是
-   * 正文色 --t1 在文字区 ≥ 4.5:1，且任何文字色相对无纹理基线的
-   * 劣化 ≤ 35%。改这个值必须重跑校验。
+   * 按真实图层模型算出，约束是正文色 --t1 在文字区 ≥ 4.5:1，
+   * 且任何文字色相对无纹理基线的劣化 ≤ 35%。改这个值必须重跑校验。
    */
-  --tex-card: url('#{$tex-root}/card-moss-dark.webp');
-  --tex-hero: url('#{$tex-root}/hero-moss-dark.webp');
-  --tex-amb: url('#{$tex-root}/amb-moss-dark.webp');
-  --tex-card-op: 0.85;
-  --tex-hero-op: 1;
-  --tex-amb-op: 0.4;
+  --tex-hero-op: 0.45;
+  --tex-stat-op: 0.35;
+  --tex-quick-op: 0.38;
+  --tex-calpage-op: 0.32;
+  --tex-flipcard-op: 0.30;
+  --tex-caldate-op: 0.30;
+  --tex-menu-op: 0.40;
+  --tex-modal-op: 0.36;
+  --tex-note-op: 0.42;
+  --tex-reader-op: 0.34;
+  --tex-placeholder-op: 0.30;
+  --tex-nbcol-op: 0.32;
+  --tex-news-op: 0.42;
+  --tex-console-op: 0.38;
+  --tex-sync-op: 0.40;
+  --tex-local-op: 0.38;
+  --tex-ovcard-op: 0.34;
+  --tex-srow-op: 0.42;
+  --tex-dev-op: 0.40;
+  /* 整页环境背景三层。头尾给足，中部必须极淡（整条压在内容区上） */
+  --tex-pagehead-op: 0.28;
+  --tex-pagemid-op: 0.15;
+  --tex-pagetail-op: 0.26;
+  --tex-ondev-op: 0.55;
+  --tex-empty-op: 0.45;
   /* 纹理层的定位：图案在图片右下角，卡片上也要落在右下角 */
   --tex-pos: 100% 100%;
   --tex-size: cover;
@@ -166,9 +187,31 @@ $tex-root: '/static/moss/tex';
   --danger-bd: rgba(255, 59, 47, 0.42);
 
   /* 550W 皮肤换一套纹理图（热裂纹 / 警示斜纹），深色底 */
-  --tex-card: url('#{$tex-root}/card-550w-dark.webp');
-  --tex-hero: url('#{$tex-root}/hero-550w-dark.webp');
-  --tex-amb: url('#{$tex-root}/amb-550w-dark.webp');
+  --tex-hero-op: 0.45;
+  --tex-stat-op: 0.35;
+  --tex-quick-op: 0.38;
+  --tex-calpage-op: 0.32;
+  --tex-flipcard-op: 0.30;
+  --tex-caldate-op: 0.30;
+  --tex-menu-op: 0.40;
+  --tex-modal-op: 0.36;
+  --tex-note-op: 0.42;
+  --tex-reader-op: 0.34;
+  --tex-placeholder-op: 0.30;
+  --tex-nbcol-op: 0.32;
+  --tex-news-op: 0.42;
+  --tex-console-op: 0.38;
+  --tex-sync-op: 0.40;
+  --tex-local-op: 0.38;
+  --tex-ovcard-op: 0.34;
+  --tex-srow-op: 0.42;
+  --tex-dev-op: 0.40;
+  /* 整页环境背景三层。头尾给足，中部必须极淡（整条压在内容区上） */
+  --tex-pagehead-op: 0.28;
+  --tex-pagemid-op: 0.15;
+  --tex-pagetail-op: 0.26;
+  --tex-ondev-op: 0.55;
+  --tex-empty-op: 0.45;
 }
 
 /* ── MOSS / 浅色 ───────────────────────────────────────────────────── */
@@ -200,13 +243,31 @@ $tex-root: '/static/moss/tex';
   --glow-on: 0;
 
   /* 浅色底换一套纹理图：同一构图，但压到极低不透明度，只留质感不抢内容 */
-  --tex-card: url('#{$tex-root}/card-moss-light.webp');
-  --tex-hero: url('#{$tex-root}/hero-moss-light.webp');
-  --tex-amb: url('#{$tex-root}/amb-moss-light.webp');
-  /* 浅底上纹理更容易和文字打架，整体再压一档 */
-  --tex-card-op: 0.62;
-  --tex-hero-op: 0.7;
-  --tex-amb-op: 0.32;
+  --tex-hero-op: 0.45;
+  --tex-stat-op: 0.35;
+  --tex-quick-op: 0.38;
+  --tex-calpage-op: 0.32;
+  --tex-flipcard-op: 0.30;
+  --tex-caldate-op: 0.30;
+  --tex-menu-op: 0.40;
+  --tex-modal-op: 0.36;
+  --tex-note-op: 0.42;
+  --tex-reader-op: 0.34;
+  --tex-placeholder-op: 0.30;
+  --tex-nbcol-op: 0.32;
+  --tex-news-op: 0.42;
+  --tex-console-op: 0.38;
+  --tex-sync-op: 0.40;
+  --tex-local-op: 0.38;
+  --tex-ovcard-op: 0.34;
+  --tex-srow-op: 0.42;
+  --tex-dev-op: 0.40;
+  /* 整页环境背景三层。头尾给足，中部必须极淡（整条压在内容区上） */
+  --tex-pagehead-op: 0.28;
+  --tex-pagemid-op: 0.15;
+  --tex-pagetail-op: 0.26;
+  --tex-ondev-op: 0.55;
+  --tex-empty-op: 0.45;
 }
 
 /* ── 550W / 浅色 ───────────────────────────────────────────────────── */
@@ -241,12 +302,31 @@ $tex-root: '/static/moss/tex';
   --danger-bd: rgba(180, 49, 31, 0.36);
 
   /* 550W + 浅色：暖米底上的赤陶裂纹 */
-  --tex-card: url('#{$tex-root}/card-550w-light.webp');
-  --tex-hero: url('#{$tex-root}/hero-550w-light.webp');
-  --tex-amb: url('#{$tex-root}/amb-550w-light.webp');
-  --tex-card-op: 0.62;
-  --tex-hero-op: 0.7;
-  --tex-amb-op: 0.32;
+  --tex-hero-op: 0.45;
+  --tex-stat-op: 0.35;
+  --tex-quick-op: 0.38;
+  --tex-calpage-op: 0.32;
+  --tex-flipcard-op: 0.30;
+  --tex-caldate-op: 0.30;
+  --tex-menu-op: 0.40;
+  --tex-modal-op: 0.36;
+  --tex-note-op: 0.42;
+  --tex-reader-op: 0.34;
+  --tex-placeholder-op: 0.30;
+  --tex-nbcol-op: 0.32;
+  --tex-news-op: 0.42;
+  --tex-console-op: 0.38;
+  --tex-sync-op: 0.40;
+  --tex-local-op: 0.38;
+  --tex-ovcard-op: 0.34;
+  --tex-srow-op: 0.42;
+  --tex-dev-op: 0.40;
+  /* 整页环境背景三层。头尾给足，中部必须极淡（整条压在内容区上） */
+  --tex-pagehead-op: 0.28;
+  --tex-pagemid-op: 0.15;
+  --tex-pagetail-op: 0.26;
+  --tex-ondev-op: 0.55;
+  --tex-empty-op: 0.45;
 }
 
 /* 低端机降级：关掉噪点与呼吸，扫描线减半（见 docs/05 §6） */

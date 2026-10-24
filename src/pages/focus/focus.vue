@@ -17,6 +17,7 @@ import WorkShell from '@/components/WorkShell.vue'
 import { addFocus, updateTask, useWork, domainStats } from '@/core/workbench'
 import type { Task } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
+import MossIcon from '@/components/moss/MossIcon.vue'
 
 const { data } = useWork()
 
@@ -273,7 +274,7 @@ onUnmounted(() => {
           </view>
 
           <view v-if="queueTasks.length === 0" class="empty fb-empty">
-            <text class="fb-empty-icon">◷</text>
+            <MossIcon class="fb-empty-icon" name="clock" :size="26" />
             <text>点「开始专注」直接自由计时，或先去「今天」添加任务。</text>
           </view>
           <view
@@ -317,7 +318,7 @@ onUnmounted(() => {
       <view class="sheet" @tap.stop>
         <view class="sheet-head">
           <text class="sheet-title">选择专注任务</text>
-          <text class="sheet-x" @tap="pickerOpen = false">✕</text>
+          <view class="sheet-x" @tap="pickerOpen = false"><MossIcon name="close" :size="13" /></view>
         </view>
         <scroll-view scroll-y class="sheet-list">
           <view class="pick-row" :class="{ on: focusTaskId === '' }" @tap="pickTask('')">
@@ -342,7 +343,7 @@ onUnmounted(() => {
             <text v-if="t.pri === 'high'" class="pick-pri">优先</text>
           </view>
           <view v-if="openTasks.length === 0" class="empty fb-empty">
-            <text class="fb-empty-icon">◷</text>
+            <MossIcon class="fb-empty-icon" name="clock" :size="26" />
             <text>选择「自由专注」，不用关联任务也能计时。</text>
           </view>
         </scroll-view>

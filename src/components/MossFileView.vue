@@ -14,6 +14,7 @@
  * 传输上限在宿主侧（2MB / 20 万字符），这里只负责"超了要说清楚"。
  */
 import { computed, ref, watch } from 'vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import { currentLink } from '@/core/link'
 import { haptic } from '@/core/haptic'
 import { humanBytes } from '@/core/attach'
@@ -161,11 +162,11 @@ function close(): void {
       <!-- 目录列表 -->
       <scroll-view v-else-if="dirItems !== undefined" class="body" scroll-y>
         <view v-if="dirPath.length > 0" class="row" @tap="back">
-          <text class="ico">..</text>
+          <MossIcon class="ico" name="send" :size="13" />
           <text class="name t3">上一级</text>
         </view>
         <view v-for="it in dirItems" :key="it.name" class="row" @tap="into(it.name)">
-          <view class="ico" :class="{ dir: it.dir }" />
+          <MossIcon class="ico" :name="it.dir ? 'folder' : 'file'" :size="14" />
           <text class="name">{{ it.name }}</text>
         </view>
         <view v-if="dirItems.length === 0" class="hint t3">空目录</view>
@@ -277,29 +278,7 @@ function close(): void {
 .row:active { background: var(--s2); }
 
 /* 文件/文件夹图标：纯 CSS，文件夹用带缺口的小方块示意 */
-.ico {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  border: 1.4px solid var(--t3);
-  border-radius: 3px;
-  position: relative;
-}
-
-.ico.dir {
-  border-color: var(--acc);
-  border-radius: 3px 3px 2px 2px;
-}
-.ico.dir::before {
-  content: '';
-  position: absolute;
-  left: -1.4px;
-  top: -5px;
-  width: 7px;
-  height: 3px;
-  background: var(--acc);
-  border-radius: 2px 2px 0 0;
-}
+.ico { flex: none; opacity: 0.8; }
 
 .name { flex: 1; min-width: 0; font-size: 13px; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

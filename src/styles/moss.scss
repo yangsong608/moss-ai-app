@@ -17,6 +17,15 @@
   -webkit-font-smoothing: antialiased;
   position: relative;
   overflow: hidden;
+  /*
+   * 让每个页面根成为层叠上下文。
+   *
+   * 没有这一行，MossPageBg 的 z-index:-1 会钻到 .dsh 自己的
+   * radial-gradient 背景**底下**（负 z-index 子元素绘制在
+   * 非层叠上下文父级的背景之前），整页背景直接看不见。
+   * 加上之后，页面背景正好落在「根的渐变之上、内容之下」。
+   */
+  z-index: 0;
 }
 
 /**

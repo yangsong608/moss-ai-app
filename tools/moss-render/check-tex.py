@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MOSS AI App · 纹理可读性校验与浓度求解。
+MOSS AI App · 卡片纹理可读性校验与浓度求解。
 
 回答一个具体问题：**把纹理铺到卡片上以后，卡片里的字还读得清吗？**
 
@@ -21,14 +21,26 @@ MOSS AI App · 纹理可读性校验与浓度求解。
 第一版校验脚本假设的是"玻璃盖在纹理上"，与实现相反，
 于是算出来的结论是错的。这次把模型和实现对齐，并且反过来**求解允许的最大浓度**。
 
-## 二、两类卡片都要查
+## 二、按卡片类的文字区位置（不是一刀切）
 
-| 卡片 | 背景 | 谁更危险 |
-|---|---|---|
-| 不透明卡 | `background: var(--s1)`（笔记/资讯/日历） | 纹理直接压在上面，最危险 |
-| 玻璃卡 | s1 @80% 叠在页面底上（我的/专注） | 底色更深，纹理相对更刺眼 |
+纹理按**卡片类**出图（13 类，见 card_specs.py），每类卡片的文字落在哪儿不一样，
+安静区也必须不一样。zone = (x0, x1, y0, y1)，归一化坐标。
 
-两种都查，取更差的作为该主题的结论。
+| 卡片类 | 用在哪 | 文字区 | 图案区 |
+|---|---|---|---|
+| hero | 今天页大日期卡 | 左 58%（日期大标题在左） | 右下 42% |
+| stat | 今天页指标小卡 | 整幅（图标+数字挤在 114px 里） | 无 |
+| quick | 今天页快速记录条 | 整幅（输入框占满） | 无 |
+| calpage | 今天页台历卡 | 整幅（任务行密集） | 无 |
+| flipcard | 今天页任务卡 | 整幅（四角都是控件） | 无 |
+| note | 笔记卡 | 左 72% | 右下 28% |
+| news | 资讯卡 | 左 70% | 右下 30% |
+| console | 我的页控制台卡 | 左 55% | 右下 45% |
+| brand | 关于页品牌卡 | 左 68% | 右下 32% |
+| timer | 专注页计时器卡 | 整幅（中央大数字） | 无 |
+| srow | 会话行 | 整幅 | 无 |
+| dev | 首页设备卡 | 左 70% | 右下 30% |
+| amb  | 页面环境层 | 无（整页都是背景） | 全幅 |
 
 ## 三、判据
 
@@ -40,13 +52,10 @@ MOSS AI App · 纹理可读性校验与浓度求解。
   3. **图案区**：不放正文，但 --t1/--t2 可能被用到（卡片角上的计数、状态标签），
      要求 ≥ 3.0:1；--t3 允许 ≥ 2.0:1。
 
-文字区 = 卡片左上 62% × 72%（标题 / 摘要 / 按钮所在处）。
-图案区 = 右下密集纹理区。
-
 ## 四、输出
 
-对每个（角色 × 主题 × 卡片类型）**二分求解允许的最大 opacity**，
-再汇总出 tokens.scss 里该填的 --tex-card-op / --tex-hero-op / --tex-amb-op。
+对每个（卡片类 × 主题）**二分求解允许的最大 opacity**，
+再汇总出 tokens.scss 里该填的 --tex-<key>-op。
 
 用法：
   python3 tools/moss-render/check-tex.py
@@ -56,6 +65,7 @@ MOSS AI App · 纹理可读性校验与浓度求解。
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -63,58 +73,131 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEX = os.path.normpath(os.path.join(HERE, '../../src/static/moss/tex'))
+TOKENS = os.path.normpath(os.path.join(HERE, '../../src/styles/tokens.scss'))
 
-# ── 主题令牌（与 src/styles/tokens.scss 一一对应）─────────────────────
-#
-# page_bg : 页面底色
-# s1      : 卡片底色（不透明卡的背景；玻璃卡用它 @glass_a 叠在 page_bg 上）
-# glass_a : 玻璃卡的不透明度
-# text*   : --t1 / --t2 / --t3
-THEMES = {
-    'moss-dark': {
-        'page_bg': (0x05, 0x08, 0x06),
-        's1': (0x0b, 0x12, 0x10), 'glass_a': 0.80,
-        'text': (0xe6, 0xf3, 0xec),
-        'text2': (0x8f, 0xa7, 0x9b),
-        'text3': (0x5b, 0x6f, 0x66),
-    },
-    'moss-light': {
-        'page_bg': (0xf2, 0xf7, 0xf4),
-        's1': (0xff, 0xff, 0xff), 'glass_a': 0.84,
-        'text': (0x0b, 0x15, 0x12),
-        'text2': (0x4a, 0x5d, 0x55),
-        'text3': (0x7b, 0x8d, 0x85),
-    },
-    '550w-dark': {
-        'page_bg': (0x0a, 0x05, 0x04),
-        's1': (0x12, 0x09, 0x08), 'glass_a': 0.80,
-        'text': (0xf2, 0xea, 0xe4),
-        'text2': (0xb4, 0x9a, 0x92),
-        'text3': (0x7a, 0x60, 0x58),
-    },
-    '550w-light': {
-        'page_bg': (0xf7, 0xf1, 0xe7),
-        's1': (0xff, 0xfd, 0xf9), 'glass_a': 0.84,
-        'text': (0x1a, 0x0f, 0x0c),
-        'text2': (0x6b, 0x53, 0x4c),
-        'text3': (0x95, 0x80, 0x6f),
-    },
+sys.path.insert(0, HERE)
+from card_specs import CARD_SPECS  # noqa: E402
+
+# 主题块选择器 → 主题 key
+THEME_BLOCKS = (
+    ('moss-dark', r'\.dsh\s*\{'),
+    ('550w-dark', r'\.dsh\.skin-550w\s*\{'),
+    ('moss-light', r'\.dsh\.is-light\s*\{'),
+    ('550w-light', r'\.dsh\.is-light\.skin-550w\s*\{'),
+)
+
+# 玻璃卡的不透明度来自各页面自己声明的 --glass-top / --glass-bottom
+# （index.vue / mine.vue / focus.vue 各有一套），不统一。这里取
+# **全项目最不利**的组合：透明度最低的那个端点。
+# 玻璃层越薄，背景越透，卡片实际底色越接近页面底色 —— 对浅色文字的
+# 深色主题来说最难读，对深色文字的浅色主题也最难读，所以必须按最薄算。
+GLASS_ALPHA = {
+    'moss-dark': (0.80, 0.62, 's2'),
+    '550w-dark': (0.80, 0.62, 's2'),
+    'moss-light': (0.82, 0.66, 's1'),
+    '550w-light': (0.82, 0.66, 's1'),
 }
 
-# 卡片文字区：左上 62% × 72%
-TEXT_ZONE = (0.00, 0.62, 0.00, 0.72)
-# 卡片图案区：右下密集纹理
-PATTERN_ZONE = (0.62, 1.00, 0.45, 1.00)
+# 颜色令牌名 → 内部字段
+_COLOR_FIELDS = {
+    '--bg': 'page_bg',
+    '--s1': 's1',
+    '--s2': 's2',
+    '--t1': 'text',
+    '--t2': 'text2',
+    '--t3': 'text3',
+}
 
-# 相对劣化上限（正文区）
+# 相对劣化上限（文字区）
 MAX_DROP = 0.35
 
-# tokens.scss 里当前使用的浓度（用于比对）
-CURRENT_OP = {
-    'card': 0.85,
-    'hero': 1.00,
-    'amb': 0.40,
-}
+
+def _block_body(text: str, pattern: str) -> str:
+    """按选择器正则切出样式块的内容（花括号配对，不靠正则猜嵌套）。"""
+    m = re.search(pattern, text)
+    if not m:
+        return ''
+    depth = 0
+    start = m.start()
+    for i in range(start, len(text)):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+    return ''
+
+
+def _hex_to_rgb(s: str):
+    s = s.strip()
+    m = re.fullmatch(r'#([0-9a-fA-F]{6})', s)
+    if m:
+        v = int(m.group(1), 16)
+        return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+    m = re.fullmatch(r'#([0-9a-fA-F]{3})', s)
+    if m:
+        h = m.group(1)
+        return (int(h[0] * 2, 16), int(h[1] * 2, 16), int(h[2] * 2, 16))
+    return None
+
+
+def _token_rgb(body: str, name: str):
+    m = re.search(re.escape(name) + r'\s*:\s*(#[0-9a-fA-F]{3,6})\s*;', body)
+    if not m:
+        return None
+    return _hex_to_rgb(m.group(1))
+
+
+def load_themes() -> dict[str, dict]:
+    """从 tokens.scss 解析 4 套主题的颜色，并挂上玻璃透明度。"""
+    try:
+        with open(TOKENS, encoding='utf-8') as f:
+            text = f.read()
+    except OSError:
+        text = ''
+
+    out: dict[str, dict] = {}
+    for key, pattern in THEME_BLOCKS:
+        body = _block_body(text, pattern)
+        theme: dict = {}
+        for token, field in _COLOR_FIELDS.items():
+            rgb = _token_rgb(body, token)
+            if rgb is not None:
+                theme[field] = rgb
+        if 'page_bg' not in theme or 's1' not in theme:
+            continue
+        top_a, low_a, low_src = GLASS_ALPHA[key]
+        theme['glass_top_a'] = top_a
+        theme['glass_low_a'] = low_a
+        theme['glass_low_src'] = theme[low_src]
+        out[key] = theme
+    return out
+
+
+THEMES = load_themes()
+
+
+def load_current_ops() -> dict[tuple[str, str], float]:
+    """返回 {(主题, 卡片类): 浓度}；读不到文件时返回空表（跳过比对）。"""
+    try:
+        with open(TOKENS, encoding='utf-8') as f:
+            text = f.read()
+    except OSError:
+        return {}
+    out: dict[tuple[str, str], float] = {}
+    for theme, pattern in THEME_BLOCKS:
+        body = _block_body(text, pattern)
+        if not body:
+            continue
+        for spec in CARD_SPECS:
+            mm = re.search(r'--tex-' + spec['key'] + r'-op:\s*([0-9.]+)', body)
+            if mm:
+                out[(theme, spec['key'])] = float(mm.group(1))
+    return out
+
+
+# ── 对比度计算 ─────────────────────────────────────────────────────────
 
 _LUT = np.array([(c / 255.0 / 12.92) if (c / 255.0) <= 0.04045
                  else (((c / 255.0) + 0.055) / 1.055) ** 2.4
@@ -132,7 +215,7 @@ def contrast(a, b) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _lum_to_rgb(lum: float) -> tuple[int, int, int]:
+def _lum_to_rgb(lum: float):
     if lum <= 0.0031308:
         srgb = lum * 12.92
     else:
@@ -141,31 +224,65 @@ def _lum_to_rgb(lum: float) -> tuple[int, int, int]:
     return (v, v, v)
 
 
-def card_base(theme: dict, kind: str) -> Image.Image:
-    """无纹理时卡片的底色。"""
+def _composite_over(rgb, over_rgb, alpha: float):
+    """把 over_rgb 以 alpha 叠在 rgb 上（sRGB 空间的简单近似，够用）。"""
+    return tuple(int(round(c * (1 - alpha) + o * alpha)) for c, o in zip(rgb, over_rgb))
+
+
+def _gradient_image(top_rgb, bottom_rgb, size: int = 64) -> Image.Image:
+    """竖直线性渐变图（用于近似 linear-gradient(160deg|155deg, A, B)）。"""
+    a = np.asarray(top_rgb, dtype=np.float64)
+    b = np.asarray(bottom_rgb, dtype=np.float64)
+    t = np.linspace(0.0, 1.0, size).reshape(size, 1, 1)
+    ramp = a[None, None, :] * (1 - t) + b[None, None, :] * t
+    arr = np.repeat(ramp, size, axis=1).astype(np.uint8)
+    return Image.fromarray(arr, 'RGB')
+
+
+def card_base(theme: dict, kind: str, key: str) -> Image.Image:
+    """
+    无纹理时卡片的实际底色。
+
+    kind='opaque' —— 不透明卡，background: var(--s1)。
+                     hero 例外，它是 linear-gradient(160deg, s1, s2)。
+    kind='glass'  —— 玻璃卡。真实渲染是
+                     linear-gradient(155deg, --glass-top, --glass-bottom)，
+                     两端是不同透明度、不同底色的半透明色叠在页面底上。
+    """
+    page_bg = theme['page_bg']
+
     if kind == 'opaque':
-        # 不透明卡：background: var(--s1)
+        if key == 'hero':
+            return _gradient_image(theme['s1'], theme['s2'])
         return Image.new('RGB', (64, 64), tuple(theme['s1']))
-    # 玻璃卡：s1 @glass_a 叠在页面底色上
-    bg = Image.new('RGBA', (64, 64), tuple(theme['page_bg']) + (255,))
-    glass = Image.new('RGBA', (64, 64), tuple(theme['s1']) + (int(theme['glass_a'] * 255),))
-    return Image.alpha_composite(bg, glass).convert('RGB')
+
+    top = _composite_over(page_bg, theme['s1'], theme['glass_top_a'])
+    low = _composite_over(page_bg, theme['glass_low_src'], theme['glass_low_a'])
+    return _gradient_image(top, low)
 
 
-def card_with_tex(theme: dict, kind: str, tex: Image.Image, op: float) -> Image.Image:
+def card_with_tex(theme: dict, kind: str, key: str,
+                  tex: Image.Image, op: float) -> Image.Image:
     """纹理按 op 叠在卡片底色之上（与 <image> 子元素的真实渲染顺序一致）。"""
     t = tex.copy()
     t.putalpha(tex.split()[3].point(lambda v: int(v * op)))
-    base = card_base(theme, kind).resize(tex.size, Image.LANCZOS)
+    base = card_base(theme, kind, key).resize(tex.size, Image.LANCZOS)
     return Image.alpha_composite(base.convert('RGBA'), t).convert('RGB')
 
 
-def zone_lum(img: Image.Image, zone) -> tuple[float, float]:
+def zone_lum(img: Image.Image, zone):
     w, h = img.size
     x0, x1, y0, y1 = zone
     crop = img.crop((int(x0 * w), int(y0 * h), int(x1 * w), int(y1 * h)))
     a = np.asarray(crop).astype(np.uint8)
     lum = (0.2126 * _LUT[a[:, :, 0]] + 0.7152 * _LUT[a[:, :, 1]] + 0.0722 * _LUT[a[:, :, 2]])
+    if lum.size == 0:
+        # 零宽/零高的区域（锚区贴边时会产生）—— 没有像素就没有亮度。
+        # 返回整幅的极值，语义上等于"这个区域没有额外约束"。
+        full = np.asarray(img).astype(np.uint8)
+        fl = (0.2126 * _LUT[full[:, :, 0]] + 0.7152 * _LUT[full[:, :, 1]]
+              + 0.0722 * _LUT[full[:, :, 2]])
+        return float(fl.min()), float(fl.max())
     return float(lum.min()), float(lum.max())
 
 
@@ -183,16 +300,130 @@ def worst_contrast(text_rgb, img: Image.Image, zone) -> float:
     )
 
 
-def check(theme: dict, kind: str, tex: Image.Image, op: float) -> list[str]:
+# ── 每类卡片的区域定义 ────────────────────────────────────────────────
+#
+# 从 card_specs.py 取安全区，再按该卡片类的文字分布细化成实际区域。
+
+# key → (kind, 文字区列表, 图案区列表)
+# kind: 'opaque' 不透明卡 / 'glass' 玻璃卡
+# 少数卡片没法用"整幅 / 右下"这种粗切法描述：图案被限死在一条竖带里，
+# 而这条竖带在页面上是**让出来的**（页面给它留了内边距，正文不可能进去）。
+# 用 safe 推导会把整幅都当成文字区，得出"浓度必须极低"的错误结论。
+ZONE_OVERRIDE = {
+    'srow': {
+        'text': [
+            ('标题/摘要', (0.000, 0.668, 0.00, 1.00)),
+            ('右列状态', (0.845, 1.000, 0.00, 1.00)),
+        ],
+        # 图形区**不给对比度判据**：这段是页面主动让出来的空档
+        # （.srow-body 有 58px 右内边距，标题/摘要到不了这里），
+        # 里面没有字，压不出可读性问题。约束是几何的，不是色彩的。
+        'pattern': [],
+    },
+}
+
+
+def _zones(spec: dict) -> tuple[str, list, list]:
+    key = spec['key']
+    safe = spec['safe']
+
+    override = ZONE_OVERRIDE.get(key)
+    if override is not None:
+        kind = 'glass' if key in ('console', 'timer', 'dev') else 'opaque'
+        return kind, list(override['text']), list(override['pattern'])
+
+    # ── 文字区 ─────────────────────────────────────────────────────
+    #
+    # 优先级：
+    #   1. text_zone —— textzone.mjs 在真实页面里量出来的文字矩形。
+    #      这是**事实**，比任何推断都准。
+    #   2. safe / anchor 差集 —— 没有实测时的推断。
+    #
+    # text_zone 里的矩形本身已经是"文字在哪"，不再减去 anchor：
+    # 实测时就知道文字在哪，图形压上来就是真问题。
+    text_zone = spec.get('text_zone')
+    if text_zone:
+        text_zones = [
+            (f'文字{i + 1}', (rx0, rx1, ry0, ry1))
+            for i, (rx0, ry0, rx1, ry1) in enumerate(text_zone)
+        ]
+    else:
+        # 坐标顺序：card_specs 的 safe 是 (x0, y0, x1, y1)，
+        # 而 zone_lum 用 (x0, x1, y0, y1) —— 这里必须换序，
+        # 否则会把 safe 的 y1 当成 x1，切出宽度为 0 的区域（脚本会直接崩）。
+        sx0, sy0, sx1, sy1 = safe
+        anchor = spec.get('anchor')
+        ax0, ay0, ax1, ay1 = anchor if anchor else (0.0, 0.0, 0.0, 0.0)
+
+        # safe 全零 = 没有矩形避让区，靠 anchor 落位
+        if sx1 > sx0 and sy1 > sy0:
+            base_zones = [('文字区', (sx0, sx1, sy0, sy1))]
+        else:
+            base_zones = [('整幅', (0.0, 1.0, 0.0, 1.0))]
+
+        text_zones = []
+        for name, zone in base_zones:
+            for piece_name, piece in _subtract_rect(zone, (ax0, ax1, ay0, ay1)):
+                text_zones.append((f'{name}/{piece_name}', piece))
+
+    # 图案区：anchor 本身
+    pattern_zones = []
+    anchor = spec.get('anchor')
+    if anchor:
+        ax0, ay0, ax1, ay1 = anchor
+        pattern_zones.append(('图形区', (ax0, ax1, ay0, ay1)))
+    elif safe[2] < 1.0 or safe[3] < 1.0:
+        if safe[2] < 1.0 and safe[3] < 1.0:
+            pattern_zones.append(('右下', (safe[2], 1.0, safe[3], 1.0)))
+        elif safe[2] < 1.0:
+            pattern_zones.append(('右侧', (safe[2], 1.0, 0.0, 1.0)))
+        elif safe[3] < 1.0:
+            pattern_zones.append(('下部', (0.0, 1.0, safe[3], 1.0)))
+
+    kind = 'glass' if key in ('console', 'timer', 'dev') else 'opaque'
+    return kind, text_zones, pattern_zones
+
+
+def _subtract_rect(zone, hole):
+    """矩形差集：zone 减去 hole，返回剩下的若干块。
+
+    zone / hole 都是 (x0, x1, y0, y1)。
+    hole 为空或不相交 → 原样返回。
+    """
+    zx0, zx1, zy0, zy1 = zone
+    hx0, hx1, hy0, hy1 = hole
+    if hx1 <= hx0 or hy1 <= hy0:
+        return [('', zone)]
+    # 不相交
+    if hx1 <= zx0 or hx0 >= zx1 or hy1 <= zy0 or hy0 >= zy1:
+        return [('', zone)]
+
+    out = []
+    # 上
+    if hy0 > zy0:
+        out.append(('上', (zx0, zx1, zy0, min(hy0, zy1))))
+    # 下
+    if hy1 < zy1:
+        out.append(('下', (zx0, zx1, max(hy1, zy0), zy1)))
+    # 左（洞的纵向范围内）
+    if hx0 > zx0:
+        out.append(('左', (zx0, min(hx0, zx1), max(zy0, hy0), min(zy1, hy1))))
+    # 右
+    if hx1 < zx1:
+        out.append(('右', (max(hx1, zx0), zx1, max(zy0, hy0), min(zy1, hy1))))
+    return out or [('', zone)]
+
+
+def check(theme: dict, spec: dict, tex: Image.Image, op: float) -> list[str]:
     """返回该配置下的问题列表（空 = 通过）。"""
     problems: list[str] = []
-    base_img = card_base(theme, kind)
-    comp = card_with_tex(theme, kind, tex, op)
+    kind, text_zones, pattern_zones = _zones(spec)
+    key = spec['key']
 
-    for zone_name, zone, is_text_zone in (
-        ('文字区', TEXT_ZONE, True),
-        ('图案区', PATTERN_ZONE, False),
-    ):
+    base_img = card_base(theme, kind, key)
+    comp = card_with_tex(theme, kind, key, tex, op)
+
+    for zone_name, zone in text_zones:
         for text_name, text_rgb in (
             ('--t1', theme['text']), ('--t2', theme['text2']), ('--t3', theme['text3'])
         ):
@@ -200,26 +431,47 @@ def check(theme: dict, kind: str, tex: Image.Image, op: float) -> list[str]:
             ratio = worst_contrast(text_rgb, comp, zone)
             drop = 1.0 - (ratio / base) if base > 0 else 0.0
 
-            if is_text_zone:
-                if text_name == '--t1' and ratio < 4.5:
-                    problems.append(f'{zone_name} {text_name}: {ratio:.2f} < 4.5')
-                if drop > MAX_DROP:
-                    problems.append(f'{zone_name} {text_name}: 劣化 {drop * 100:.0f}% > {MAX_DROP * 100:.0f}%')
-            else:
-                floor = 3.0 if text_name != '--t3' else 2.0
-                if ratio < floor:
-                    problems.append(f'{zone_name} {text_name}: {ratio:.2f} < {floor}')
+            if text_name == '--t1' and ratio < 4.5:
+                problems.append(f'{zone_name} {text_name}: {ratio:.2f} < 4.5')
+            if drop > MAX_DROP:
+                problems.append(f'{zone_name} {text_name}: 劣化 {drop * 100:.0f}% > {MAX_DROP * 100:.0f}%')
+
+    # 图案区：**不给文字色判据**。
+    #
+    # 图案区就是图形本身所在的位置 —— 纹理画在那里，
+    # 文字色的对比度必然被压低。要求"图形区的 --t3 对比度 ≥ 2.0"
+    # 等价于要求纹理不存在，与"要一张有意义的图形"直接矛盾。
+    #
+    # 早期版本在这里也套了文字判据，报出 40+ 条自相矛盾的失败
+    # （"图形区 --t3: 1.02 < 2.0" —— 纹理越明显越失败）。
+    # 图案区的正确约束是几何的（不压到文字），由 anchor 落位保证，
+    # 可读性约束只施加在文字区。
+    #
+    # 图案区唯一保留的检查：它不能是"大面积高亮"，
+    # 否则深色主题下发光的图形会在卡上形成刺眼色块。
+    for zone_name, zone in pattern_zones:
+        lum = zone_lum(comp, zone)
+        if lum[1] > 235:
+            problems.append(f'{zone_name}: 峰值亮度 {lum[1]:.0f} 过高，会形成刺眼色块')
+
     return problems
 
 
-def solve_max_op(theme: dict, kind: str, tex: Image.Image, hi: float = 1.0) -> float:
-    """二分求解满足全部判据的最大 opacity。"""
-    if check(theme, kind, tex, hi):
-        return 0.0
+def solve_max_op(theme: dict, spec: dict, tex: Image.Image, hi: float = 1.0) -> float:
+    """
+    二分求解满足全部判据的最大 opacity。
+
+    不变式：check(lo) 恒通过，check(hi) 恒不通过。
+    op=0 时纹理不产生任何贡献，等于无纹理基线，必然通过；
+    若基线本身就不通过（如无纹理时正文对比度已低于 4.5:1），
+    说明问题不在纹理上，如实返回 0。
+    """
     lo = 0.0
+    if check(theme, spec, tex, lo):
+        return 0.0
     for _ in range(18):
         mid = (lo + hi) / 2
-        if check(theme, kind, tex, mid):
+        if check(theme, spec, tex, mid):
             hi = mid
         else:
             lo = mid
@@ -228,47 +480,54 @@ def solve_max_op(theme: dict, kind: str, tex: Image.Image, hi: float = 1.0) -> f
 
 def main() -> int:
     if not os.path.isdir(TEX):
-        print(f'找不到纹理目录 {TEX}，先跑 gen-tex.py')
+        print(f'找不到纹理目录 {TEX}，先跑 tex-build.py')
         return 2
 
-    print(f'求解各主题允许的最大纹理浓度（判据：--t1 文字区 ≥ 4.5:1，劣化 ≤ {MAX_DROP * 100:.0f}%）')
+    actual = load_current_ops()
+    if not actual:
+        print('（无法解析 tokens.scss，跳过与当前值的比对）')
+
+    print(f'求解各卡片类允许的最大纹理浓度')
+    print(f'（判据：--t1 文字区 ≥ 4.5:1，劣化 ≤ {MAX_DROP * 100:.0f}%）')
     print()
-    print(f'{"主题":<13}{"角色":<6}{"不透明卡":>10}{"玻璃卡":>10}{"建议值":>9}')
-    print('─' * 52)
+    header = f'{"卡片类":<10}{"主题":<13}{"上限":>7}{"当前":>7}'
+    print(header)
+    print('─' * 40)
 
-    suggested: dict[str, dict[str, float]] = {}
     failures: list[str] = []
+    suggested: dict[str, dict[str, float]] = {}
 
-    for key, t in THEMES.items():
-        for role in ('card', 'hero', 'amb'):
-            path = os.path.join(TEX, f'{role}-{key}.webp')
+    for spec in CARD_SPECS:
+        key = spec['key']
+        for theme_key, theme in THEMES.items():
+            path = os.path.join(TEX, f'{key}-{theme_key}.webp')
             if not os.path.exists(path):
-                failures.append(f'{role}-{key}: 文件缺失')
+                failures.append(f'{key}-{theme_key}: 文件缺失')
                 continue
             tex = Image.open(path).convert('RGBA')
-            op_opaque = solve_max_op(t, 'opaque', tex)
-            op_glass = solve_max_op(t, 'glass', tex)
-            # 取两种卡片里更严的那个
-            worst = min(op_opaque, op_glass)
-            suggested.setdefault(role, {})[key] = worst
+            worst = solve_max_op(theme, spec, tex)
+            suggested.setdefault(key, {})[theme_key] = worst
 
-            cur = CURRENT_OP[role]
-            flag = '' if cur <= worst + 1e-9 else '  ⚠ 当前值过高'
-            if cur > worst + 1e-9:
-                failures.append(
-                    f'{role}-{key}: 当前 op={cur} 超过允许上限 {worst:.2f}')
-            print(f'{key:<13}{role:<6}{op_opaque:>10.2f}{op_glass:>10.2f}{worst:>8.2f} {flag}')
+            cur = actual.get((theme_key, key))
+            if cur is None:
+                cur_text, flag = '  n/a', ''
+            else:
+                flag = '' if cur <= worst + 5e-3 else '  ⚠ 过高'
+                if cur > worst + 5e-3:
+                    failures.append(
+                        f'{key}-{theme_key}: tokens op={cur:.2f} 超过上限 {worst:.2f}')
+                cur_text = f'{cur:.2f}'
+            print(f'{key:<10}{theme_key:<13}{worst:>7.2f}{cur_text:>7} {flag}')
 
-    print('─' * 52)
-    print('建议写入 tokens.scss 的浓度（取同角色各主题的最小值，保证换肤不越界）：')
-    for role in ('card', 'hero', 'amb'):
-        vals = suggested.get(role, {})
-        if not vals:
-            continue
-        safe = min(vals.values())
-        print(f'  --tex-{role}-op: {safe:.2f}   （各主题上限 ' +
-              ', '.join(f'{k.replace("moss-", "").replace("550w-", "")}: {v:.2f}'
-                        for k, v in vals.items()) + '）')
+    print('─' * 40)
+    print('各主题应写入 tokens.scss 的浓度：')
+    for theme_key in THEMES:
+        cells = []
+        for spec in CARD_SPECS:
+            v = suggested.get(spec['key'], {}).get(theme_key)
+            if v is not None:
+                cells.append(f'--tex-{spec["key"]}-op: {v:.2f}')
+        print(f'  {theme_key:<13}' + '  '.join(cells))
 
     print()
     if failures:
@@ -276,7 +535,7 @@ def main() -> int:
         for f in failures:
             print(f'  · {f}')
         return 1
-    print('✓ 全部主题通过')
+    print('✓ 全部通过')
     return 0
 
 

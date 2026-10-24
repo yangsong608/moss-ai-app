@@ -16,7 +16,10 @@ import { onLoad } from '@dcloudio/uni-app'
 import MossBoot from '@/components/moss/MossBoot.vue'
 import MossBadge from '@/components/moss/MossBadge.vue'
 import MossDot from '@/components/moss/MossDot.vue'
+import MossTex from '@/components/moss/MossTex.vue'
 import MossVeil from '@/components/moss/MossVeil.vue'
+import MossPageBg from '@/components/moss/MossPageBg.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import { state, skinClass, themeClass, liteClass, type DeviceCard } from '@/core/store'
 import { haptic } from '@/core/haptic'
@@ -670,6 +673,7 @@ onLoad(() => {
 
 <template>
   <view :class="rootClass">
+    <MossPageBg nav="none" />
     <MossVeil />
 
     <!-- 极光只做静态渐变层的 transform 漂移；装饰层不接收事件。 -->
@@ -718,7 +722,7 @@ onLoad(() => {
                   aria-label="刷新设备"
                   @tap="refresh"
                 >
-                  <text class="glyph">↻</text>
+                  <MossIcon class="glyph" name="refresh" :size="17" />
                 </view>
                 <view
                   class="iconbtn"
@@ -726,7 +730,7 @@ onLoad(() => {
                   :aria-label="state.light ? '切换深色主题' : '切换浅色主题'"
                   @tap="toggleTheme"
                 >
-                  <text class="glyph">{{ state.light ? '☾' : '☀' }}</text>
+                  <MossIcon class="glyph" :name="state.light ? 'moon' : 'sun'" :size="17" />
                 </view>
               </view>
             </view>
@@ -760,7 +764,7 @@ onLoad(() => {
                 <text class="hero-cta-code mono">PAIR</text>
               </view>
               <view class="hero-pair-alt" @tap="addDevice">
-                <text>或输入 6 位配对码</text><text class="hero-pair-arrow">↗</text>
+                <text>或输入 6 位配对码</text><MossIcon class="hero-pair-arrow" name="send" :size="11" />
               </view>
             </view>
           </view>
@@ -782,13 +786,13 @@ onLoad(() => {
               :style="index < 8 ? { animationDelay: `${index * 45}ms` } : undefined"
               @tap="openPairFor(d)"
             >
-              <view class="pairing-ico"><text class="mono">⌁</text></view>
+              <view class="pairing-ico"><MossIcon name="pair" :size="18" /></view>
               <view class="pairing-body">
                 <text class="pairing-t">{{ d.name }}</text>
                 <text class="pairing-d">已找到电脑，输入它显示的 6 位码完成确认</text>
                 <text v-if="d.endpoint?.url" class="pairing-addr mono">{{ d.endpoint.url }}</text>
               </view>
-              <view class="pairing-btn"><text>去确认</text><text class="pairing-arrow">›</text></view>
+              <view class="pairing-btn"><text>去确认</text><MossIcon class="pairing-arrow" name="chev" :size="13" /></view>
             </view>
           </view>
 
@@ -818,6 +822,7 @@ onLoad(() => {
               @tap="open(d)"
               @longpress="deviceMenu(d)"
             >
+              <MossTex name="dev" />
               <!-- 仅在线设备渲染旋转渐变；mask 只留下 1px 外圈。 -->
               <view v-if="statusOf(d) === 'online'" class="dev-rim"><view class="dev-flow" /></view>
               <view class="dev-head dev-content">
@@ -877,13 +882,14 @@ onLoad(() => {
                   <text>请求解锁</text>
                 </view>
                 <view class="grow" />
-                <view class="dev-go"><text>进入工作台</text><text class="dev-go-arrow">›</text></view>
+                <view class="dev-go"><text>进入工作台</text><MossIcon class="dev-go-arrow" name="chev" :size="13" /></view>
               </view>
             </view>
 
             <!-- 空态：保留扫码与直接进入本地域两个真入口。 -->
             <view v-if="state.devices.length === 0" class="empty enter">
-              <view class="empty-signal"><view /><view /><view /></view>
+              <MossTex name="empty" />
+              <MossIcon class="empty-signal" name="signal" :size="30" />
               <text class="empty-t">等待第一台电脑接入</text>
               <text class="empty-d">在电脑端 MOSS Link 生成配对码，扫码即可连接；也可以先使用本地域。</text>
               <view class="empty-acts">
@@ -900,7 +906,8 @@ onLoad(() => {
             :style="{ animationDelay: `${Math.min(pairedDevices.length, 7) * 45}ms` }"
             @tap="goLocal"
           >
-            <view class="local-ico"><view class="local-glyph" /></view>
+            <MossTex name="ondev" />
+            <view class="local-ico"><MossIcon name="device" :size="19" /></view>
             <view class="local-body">
               <view class="local-head">
                 <text class="local-t">本地域</text>
@@ -909,7 +916,7 @@ onLoad(() => {
               </view>
               <text class="local-d">不连电脑也能用：任务 / 日历 / 专注 / 笔记（无会话与 AI）</text>
             </view>
-            <text class="local-chev">›</text>
+            <MossIcon class="local-chev" name="chev" :size="14" />
           </view>
 
           <view class="foot">
@@ -930,7 +937,7 @@ onLoad(() => {
             <text class="sheet-t">这台电脑处于锁定状态</text>
             <text class="sheet-s">你可以请求解锁：电脑上会弹出确认框，30 秒内不确认将自动拒绝。</text>
           </view>
-          <view class="sheet-x" @tap="dismiss"><text>×</text></view>
+          <view class="sheet-x" @tap="dismiss"><MossIcon name="close" :size="14" /></view>
         </view>
         <view class="sheet-acts">
           <view class="btn ghost" @tap="dismiss"><text>取消</text></view>
@@ -948,17 +955,11 @@ onLoad(() => {
             <text class="sheet-t">配对电脑</text>
             <text class="sheet-s">在电脑上打开 MOSS Link → 生成配对码。扫码自动填地址与码，也可以手动输入。</text>
           </view>
-          <view class="sheet-x" @tap="closePair"><text>×</text></view>
+          <view class="sheet-x" @tap="closePair"><MossIcon name="close" :size="14" /></view>
         </view>
 
         <view class="scan-btn" :class="{ 'is-disabled': pairBusy }" @tap="scanToPair">
-          <view class="scan-ico">
-            <view class="scan-corner tl" />
-            <view class="scan-corner tr" />
-            <view class="scan-corner bl" />
-            <view class="scan-corner br" />
-            <view class="scan-line" />
-          </view>
+          <MossIcon class="scan-ico" name="scan" :size="26" />
           <text class="scan-t">扫码配对</text>
         </view>
 
@@ -1150,7 +1151,6 @@ onLoad(() => {
 }
 .iconbtn:active { transform: scale(0.97); }
 .iconbtn.spin .glyph { animation: spin 900ms linear infinite; }
-.glyph { font-size: 15px; line-height: 1; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .status-pill {
@@ -1247,7 +1247,7 @@ onLoad(() => {
   font-weight: 650;
 }
 
-.pairing-arrow { font-size: 18px; font-weight: 400; }
+.pairing-arrow { flex: none; }
 
 /* ── 在线玻璃设备卡 / 1px 流光边框 ──────────────────────────────────── */
 .dev {
@@ -1406,10 +1406,12 @@ onLoad(() => {
 .dev-unlock:active { background: var(--danger-soft); }
 .grow { flex: 1; }
 .dev-go { display: flex; align-items: center; gap: 7px; color: var(--t2); font-size: 10px; }
-.dev-go-arrow { color: var(--acc); font-size: 16px; line-height: 1; }
+.dev-go-arrow { flex: none; }
 
 /* ── 空态：保留两个真实入口 ────────────────────────────────────────── */
 .empty {
+  position: relative;
+  overflow: hidden;
   padding: 24px 16px 18px;
   border: 1px solid var(--bd);
   border-radius: var(--r-console);
@@ -1417,10 +1419,7 @@ onLoad(() => {
   text-align: center;
 }
 
-.empty-signal { height: 28px; display: flex; align-items: center; justify-content: center; gap: 5px; margin-bottom: 12px; }
-.empty-signal view { width: 4px; height: 12px; border-radius: 2px; background: var(--acc); opacity: 0.45; }
-.empty-signal view:nth-child(2) { height: 26px; opacity: 0.9; }
-.empty-signal view:nth-child(3) { height: 18px; opacity: 0.65; }
+.empty-signal { display: block; margin: 0 auto 12px; opacity: 0.85; }
 .empty-t { display: block; color: var(--t1); font-size: 15px; font-weight: 650; }
 .empty-d { display: block; max-width: 310px; margin: 8px auto 0; color: var(--t2); font-size: 11px; line-height: 18px; }
 .empty-acts { display: flex; gap: 9px; margin-top: 17px; }
@@ -1446,6 +1445,8 @@ onLoad(() => {
 
 /* ── 本地域：虚线 + 独立的纯 CSS 存储图标 ───────────────────────────── */
 .local {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1472,15 +1473,16 @@ onLoad(() => {
   background: var(--acc-soft);
 }
 
-.local-glyph { position: relative; width: 17px; height: 15px; border: 1.5px solid var(--acc); border-radius: 4px; }
-.local-glyph::before { content: ''; position: absolute; left: 3px; right: 3px; top: 4px; height: 1px; background: var(--acc); }
-.local-glyph::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 3px; height: 3px; border-radius: 50%; background: var(--acc); }
-.local-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+/*
+ * 右侧留 48px 给"本机"图形。
+ * 说明文字默认一路铺到 x0.89，不让位就压字（同 sessions 页 .srow-body）。
+ */
+.local-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding-right: 48px; }
 .local-head { display: flex; align-items: center; gap: 7px; }
 .local-t { color: var(--t1); font-size: 14px; font-weight: 650; }
 .local-code { color: var(--t3); font-size: 7px; letter-spacing: 0.7px; }
 .local-d { color: var(--t2); font-size: 10.5px; line-height: 17px; }
-.local-chev { flex: none; color: var(--acc); font-size: 20px; }
+.local-chev { flex: none; }
 
 .foot { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 22px; color: var(--t3); font-size: 8px; letter-spacing: 0.5px; opacity: 0.8; }
 .foot-lock { position: relative; width: 7px; height: 6px; margin-right: 2px; border: 1px solid var(--t3); border-radius: 1px; }
@@ -1541,7 +1543,7 @@ onLoad(() => {
   transition: transform 90ms ease-out, color 160ms ease-out;
 }
 .hero-pair-alt:active { transform: scale(0.97); color: var(--acc); }
-.hero-pair-arrow { color: var(--acc); font-size: 11px; }
+.hero-pair-arrow { flex: none; margin-left: 2px; }
 
 /* ── 弹层与配对流程（交互不变） ─────────────────────────────────────── */
 .mask {
@@ -1580,7 +1582,7 @@ onLoad(() => {
 .sheet-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .sheet-t { color: var(--t1); font-size: 15px; font-weight: 700; }
 .sheet-s { color: var(--t2); font-size: 11.5px; line-height: 18px; }
-.sheet-x { flex: none; width: 28px; height: 28px; display: grid; place-items: center; margin: -2px -2px 0 0; border-radius: 8px; color: var(--t3); font-size: 17px; line-height: 1; }
+.sheet-x { flex: none; width: 28px; height: 28px; display: grid; place-items: center; margin: -2px -2px 0 0; border-radius: 8px; }
 .sheet-x:active { background: var(--s2); color: var(--t2); }
 .sheet-acts { display: flex; gap: 10px; margin-top: 16px; }
 .sheet-acts .btn { flex: 1; }
@@ -1602,13 +1604,7 @@ onLoad(() => {
 }
 
 .scan-btn:active { transform: scale(0.97); }
-.scan-ico { position: relative; flex: none; width: 20px; height: 20px; }
-.scan-corner { position: absolute; width: 7px; height: 7px; border: 2px solid currentColor; }
-.scan-corner.tl { top: 0; left: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 2px; }
-.scan-corner.tr { top: 0; right: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 2px; }
-.scan-corner.bl { bottom: 0; left: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 2px; }
-.scan-corner.br { bottom: 0; right: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 2px; }
-.scan-line { position: absolute; left: 2px; right: 2px; top: 50%; height: 2px; margin-top: -1px; border-radius: 1px; background: currentColor; }
+.scan-ico { flex: none; }
 .scan-t { line-height: 1; }
 .or-row { display: flex; align-items: center; gap: 10px; margin: 12px 0 2px; }
 .or-line { flex: 1; height: 1px; background: var(--bd); }

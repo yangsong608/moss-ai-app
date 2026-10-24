@@ -10,6 +10,8 @@ import { pendingCount, lastSyncAt, stateOf, syncStatus } from '@/core/sync-queue
 import { syncNow } from '@/core/sync-engine'
 import { computed, ref } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
+import MossTex from '@/components/moss/MossTex.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import { deviceName, domainStats, isLocalDomain, uploadLocalTo, useWork, work, workDevices } from '@/core/workbench'
 import { markUserPreference, state } from '@/core/store'
 import { haptic } from '@/core/haptic'
@@ -160,6 +162,7 @@ function placeholder(text: string): void {
 
       <!-- 当前域控制台摘要：只读现有数据，不新增设备或数据层状态。 -->
       <view class="console-card fb-enter-card">
+        <MossTex name="console" />
         <view class="console-top">
           <view class="domain-mark"><text class="mono">{{ localOnly ? 'L' : 'M' }}</text></view>
           <view class="domain-main">
@@ -195,17 +198,19 @@ function placeholder(text: string): void {
       </view>
 
       <view v-if="localOnly" class="local-card fb-enter-card fb-i-1">
-        <view class="local-icon"><text>▣</text></view>
+        <MossTex name="local" />
+        <view class="local-icon"><MossIcon name="device" :size="19" /></view>
         <view class="local-copy">
           <text class="local-title">本地域 · 不联网</text>
           <text class="local-desc">内容只保存在本机，可只增不覆盖地上传到设备</text>
         </view>
-        <view class="local-upload fb-press" @tap="uploadTo"><text>上传到设备</text><text class="local-arrow">↗</text></view>
+        <view class="local-upload fb-press" @tap="uploadTo"><text>上传到设备</text><MossIcon class="local-arrow" name="send" :size="12" /></view>
       </view>
 
       <!-- 同步状态（M2 占位，但仍展示真实的待推/冲突数） -->
       <view class="sync-row glass-card fb-enter-card fb-i-2" @tap="panelOpen = true">
-        <view class="sync-icon"><text>⇅</text></view>
+        <MossTex name="sync" />
+        <view class="sync-icon"><MossIcon name="sync" :size="19" /></view>
         <view class="sync-main">
           <view class="sync-t">
             <text>同步状态</text>
@@ -216,7 +221,7 @@ function placeholder(text: string): void {
             <text class="sync-n mono">{{ conflicts }}</text> 条 · {{ lastSyncText }}
           </text>
         </view>
-        <text class="chev">›</text>
+        <MossIcon class="chev" name="chev" :size="14" />
       </view>
 
       <!-- 外观 / 同步 / 数据 -->
@@ -258,7 +263,7 @@ function placeholder(text: string): void {
             <text class="row-d">全量 JSON 快照 · 可再导入或交给 AI 分析</text>
           </view>
           <text class="row-val">M2</text>
-          <text class="chev">›</text>
+          <MossIcon class="chev" name="chev" :size="14" />
         </view>
 
         <view class="row tap" @tap="placeholder('回收站将在 M2 接入：软删保留 30 天，可随时恢复')">
@@ -267,7 +272,7 @@ function placeholder(text: string): void {
             <text class="row-d">软删保留 30 天 · 删除不静默丢失</text>
           </view>
           <text class="row-val">12 项</text>
-          <text class="chev">›</text>
+          <MossIcon class="chev" name="chev" :size="14" />
         </view>
       </view>
 
@@ -279,14 +284,14 @@ function placeholder(text: string): void {
             <text class="row-t">设备配对</text>
             <text class="row-d">连接一台电脑上的 DSH 工作台 · 局域网 / 中继</text>
           </view>
-          <text class="chev">›</text>
+          <MossIcon class="chev" name="chev" :size="14" />
         </view>
         <view class="row tap" @tap="go('/pages/sessions/sessions', '会话列表')">
           <view class="row-main">
             <text class="row-t">会话列表</text>
             <text class="row-d">查看各设备上正在跑 / 等待审批的会话</text>
           </view>
-          <text class="chev">›</text>
+          <MossIcon class="chev" name="chev" :size="14" />
         </view>
       </view>
 
@@ -300,28 +305,32 @@ function placeholder(text: string): void {
 
     <!-- 同步面板（P1-4） -->
     <view v-if="panelOpen" class="ov" @tap="panelOpen = false">
-      <view class="ov-card" @tap.stop>
-        <view class="ov-h">
-          <text class="ov-t">同步 · {{ deviceName(work.deviceId) }}</text>
-          <text class="ov-x" @tap="panelOpen = false">✕</text>
+      <!-- 外层 shell 负责裁切与纹理，内层才滚动 —— 否则纹理会跟着内容滚走 -->
+      <view class="ov-shell" @tap.stop>
+        <MossTex name="ovcard" fit="contain" />
+        <view class="ov-card">
+          <view class="ov-h">
+            <text class="ov-t">同步 · {{ deviceName(work.deviceId) }}</text>
+            <view class="ov-x" @tap="panelOpen = false"><MossIcon name="close" :size="13" /></view>
+          </view>
+          <view class="ov-kv"><text>待推送</text><text class="mono">{{ pending }} 条</text></view>
+          <view class="ov-kv"><text>冲突</text><text class="mono">{{ conflicts }} 条</text></view>
+          <view class="ov-kv"><text>上次同步</text><text class="mono">{{ lastSyncText }}</text></view>
+          <view class="ov-kv"><text>游标</text><text class="mono">{{ stateOf(work.deviceId).cursor || '（首次全量）' }}</text></view>
+
+          <view v-if="entityRows.length > 0" class="ov-sect">待推明细</view>
+          <view v-for="r in entityRows" :key="r.name" class="ov-kv"><text>{{ r.name }}</text><text class="mono">{{ r.n }} 条</text></view>
+
+          <view v-if="conflictNotes.length > 0" class="ov-sect">冲突副本（已保留，不会丢）</view>
+          <view v-for="n in conflictNotes" :key="n.id" class="ov-note" @tap="openNotes">
+            <text class="ov-note-t">{{ n.title }}</text>
+            <text class="ov-note-s">点开笔记页处理</text>
+          </view>
+
+          <view v-if="syncStatus.lastError" class="ov-err">上次错误：{{ syncStatus.lastError }}</view>
+          <view class="ov-btn" :class="{ busy: syncing }" @tap="doSync"><text>{{ syncing ? '同步中…' : '立即同步' }}</text></view>
+          <view class="ov-hint">无连接或该设备未就绪时，数据只留在本机，不影响使用。</view>
         </view>
-        <view class="ov-kv"><text>待推送</text><text class="mono">{{ pending }} 条</text></view>
-        <view class="ov-kv"><text>冲突</text><text class="mono">{{ conflicts }} 条</text></view>
-        <view class="ov-kv"><text>上次同步</text><text class="mono">{{ lastSyncText }}</text></view>
-        <view class="ov-kv"><text>游标</text><text class="mono">{{ stateOf(work.deviceId).cursor || '（首次全量）' }}</text></view>
-
-        <view v-if="entityRows.length > 0" class="ov-sect">待推明细</view>
-        <view v-for="r in entityRows" :key="r.name" class="ov-kv"><text>{{ r.name }}</text><text class="mono">{{ r.n }} 条</text></view>
-
-        <view v-if="conflictNotes.length > 0" class="ov-sect">冲突副本（已保留，不会丢）</view>
-        <view v-for="n in conflictNotes" :key="n.id" class="ov-note" @tap="openNotes">
-          <text class="ov-note-t">{{ n.title }}</text>
-          <text class="ov-note-s">点开笔记页处理</text>
-        </view>
-
-        <view v-if="syncStatus.lastError" class="ov-err">上次错误：{{ syncStatus.lastError }}</view>
-        <view class="ov-btn" :class="{ busy: syncing }" @tap="doSync"><text>{{ syncing ? '同步中…' : '立即同步' }}</text></view>
-        <view class="ov-hint">无连接或该设备未就绪时，数据只留在本机，不影响使用。</view>
       </view>
     </view>
   </WorkShell>
@@ -375,6 +384,13 @@ function placeholder(text: string): void {
   transition: transform 120ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
 }
 .console-card { overflow: hidden; padding: 16px 16px 0; }
+/* 控制台内容压在纹理之上 */
+.console-card > .console-top,
+.console-card > .console-stats,
+.console-card > .console-foot {
+  position: relative;
+  z-index: 1;
+}
 .console-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .domain-mark {
   flex: none;
@@ -415,6 +431,7 @@ function placeholder(text: string): void {
 .local-card {
   position: relative;
   z-index: 1;
+  overflow: hidden;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -426,19 +443,34 @@ function placeholder(text: string): void {
   background: linear-gradient(145deg, var(--console-glass-low), var(--acc-soft));
   box-shadow: var(--console-shadow);
 }
-.local-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--bd); border-radius: 12px; background: var(--acc-soft); color: var(--acc); }
+.local-icon { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--bd); border-radius: 12px; background: var(--acc-soft); }
 .local-copy { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
 .local-title { color: var(--t1); font-size: 13px; font-weight: 650; }
 .local-desc { color: var(--t2); font-size: 10px; line-height: 1.6; }
 .local-upload { flex: none; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 13px; border: 1px solid var(--bd-strong); border-radius: 12px; background: var(--acc-soft); color: var(--acc); font-size: 11px; font-weight: 650; }
-.local-arrow { font-size: 14px; }
+.local-arrow { flex: none; }
+/* 本地域卡内容压在纹理之上 */
+.local-card > .local-icon,
+.local-card > .local-copy,
+.local-card > .local-upload {
+  position: relative;
+  z-index: 1;
+}
 
 .sync-row {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 11px;
   margin-top: 12px;
   padding: 14px;
+}
+/* 同步行内容压在纹理之上 */
+.sync-row > .sync-icon,
+.sync-row > .sync-main {
+  position: relative;
+  z-index: 1;
 }
 .sync-row:hover { transform: translateY(-1px); border-color: var(--bd-strong); }
 .sync-row:active { transform: scale(0.99); border-color: var(--bd-strong); }
@@ -472,7 +504,7 @@ function placeholder(text: string): void {
 }
 .sync-d { font-size: 10.5px; line-height: 1.6; color: var(--t3); }
 .sync-n { color: var(--t2); }
-.chev { flex: 0 0 auto; color: var(--t3); font-size: 16px; line-height: 1; }
+.chev { flex: 0 0 auto; opacity: 0.6; }
 
 .sect {
   display: flex;
@@ -575,22 +607,35 @@ function placeholder(text: string): void {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
+/* 外层 shell：负责定位、裁切与承载纹理 */
+.ov-shell {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-height: 88vh;
+  max-height: 88dvh;
+  /* 底色放 shell 上：内容卡必须透明，否则它连背景一起把纹理盖死
+     （今天页 .menu-shell 的正确模式——shell 出底、内容层只放文字） */
+  background: var(--s1);
+  border: 1px solid var(--bd);
+  border-top-left-radius: var(--r-lg);
+  border-top-right-radius: var(--r-lg);
+}
+/* 弹层内容压在纹理之上 */
+.ov-shell > .ov-card { position: relative; z-index: 1; }
 .ov-card {
   width: 100%;
   max-height: 88vh;
   max-height: 88dvh;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  background: var(--s1);
-  border-top-left-radius: var(--r-lg);
-  border-top-right-radius: var(--r-lg);
-  border: 1px solid var(--bd);
+  -webkit-overflow-scrolling: touch;  overscroll-behavior: contain;
+  background: transparent;
+  border: 0;
   padding: 16px 18px calc(20px + env(safe-area-inset-bottom));
 }
 .ov-h { display: flex; align-items: center; margin-bottom: 10px; }
 .ov-t { flex: 1; font-size: 14px; font-weight: 650; }
-.ov-x { font-size: 14px; color: var(--t3); padding: 4px 6px; }
+.ov-x { display: grid; place-items: center; padding: 4px 6px; }
 .ov-kv { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 12px; color: var(--t2); border-bottom: 1px solid var(--s3); }
 .ov-sect { margin: 14px 0 4px; font-size: 11px; letter-spacing: 0.06em; color: var(--t3); }
 .ov-note { margin-top: 8px; padding: 10px 12px; border-radius: var(--r-md); background: var(--warn-soft); border: 1px solid var(--bd); }

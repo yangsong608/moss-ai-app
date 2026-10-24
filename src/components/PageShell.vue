@@ -10,6 +10,7 @@ import { computed } from 'vue'
 import { skinClass, themeClass, liteClass, state } from '@/core/store'
 import { haptic } from '@/core/haptic'
 import MossVeil from './moss/MossVeil.vue'
+import MossPageBg from './moss/MossPageBg.vue'
 
 const props = defineProps<{
   active: 'devices' | 'sessions' | 'me'
@@ -45,6 +46,7 @@ function go(key: 'devices' | 'sessions' | 'me' | 'work'): void {
 
 <template>
   <view :class="rootClass">
+    <MossPageBg nav="shell" />
     <MossVeil />
     <!-- 平板上内容限宽居中：一行太长会读不出来 -->
     <view class="page-wrap" :class="{ 'has-tab': !props.hideTab }"><slot /></view>

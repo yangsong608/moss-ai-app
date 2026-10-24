@@ -13,6 +13,8 @@ import { haptic } from '@/core/haptic'
 import { humanBytes, pickFile, pickImage } from '@/core/attach'
 import { currentLink, connectDevice, connectionStatus, disconnect, refreshAll, setSessionListener } from '@/core/link'
 import MossDot from '@/components/moss/MossDot.vue'
+import MossPageBg from '@/components/moss/MossPageBg.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import MossMarkdown from '@/components/MossMarkdown.vue'
 import MossFileView from '@/components/MossFileView.vue'
@@ -1268,6 +1270,7 @@ onUnmounted(() => {
 
 <template>
   <view :class="[rootClass, { wide }]">
+    <MossPageBg nav="none" />
     <view class="veil" />
     <view class="grain" />
 
@@ -1315,10 +1318,10 @@ onUnmounted(() => {
     <!-- 旧页 ↔ 新壳的返回闭环（P2-3）：对话页原本只有 navigateBack，页面栈为空时是死路 -->
     <WorkBackBar hint="今天 · 任务 / 日历 / 笔记" />
     <view class="top safe-top">
-      <!-- 返回箭头用 CSS 画：uni-app 的 App 端对内联 SVG 支持不稳定，
-           之前这里渲染成一片空白（用户看到"左上角有一块空白"）。 -->
+      <!-- 返回箭头：预渲染线稿。<image> 在 App / 小程序 / H5 三端都稳定，
+           SVG 内联在 App 端踩过坑（渲染成空白），CSS 画的方块箭头边缘发虚。 -->
       <view class="back" @tap="back" hover-class="back-hover">
-        <view class="chev" />
+        <MossIcon name="chev" :size="18" flip />
       </view>
       <view class="top-mid">
         <text class="tt">{{ title }}</text>
@@ -1335,7 +1338,7 @@ onUnmounted(() => {
     <!-- 上下文 chip（P2-3）：说明这轮输入从哪来；可关闭，避免引用干扰后续对话 -->
     <view v-if="contextOpen && context !== undefined" class="ctx-chip">
       <text class="ctx-t" @tap="contextOpen = false">{{ contextText }}</text>
-      <text class="ctx-x" @tap.stop="contextOpen = false">×</text>
+      <view class="ctx-x" @tap.stop="contextOpen = false"><MossIcon name="close" :size="12" /></view>
     </view>
 
     <!-- 分段控件：三段视图切换。手上有"看进度/验收"两种意图，混在一页会互相干扰 -->
@@ -1430,7 +1433,7 @@ onUnmounted(() => {
       </view>
       <view class="browse-row" @tap="browseWorkspace">
         <text class="browse-t">浏览工作区文件</text>
-        <view class="chev" />
+        <MossIcon name="chev" :size="13" />
       </view>
       <view v-if="fileItems.length > 0 && changesNote.length > 0" class="changes-note t3">
         {{ changesNote }}
@@ -1475,7 +1478,7 @@ onUnmounted(() => {
       <view class="plan-head">
         <text class="plan-t">计划 {{ doneSteps }}/{{ planSteps.length }}</text>
         <text v-if="planActive" class="plan-mode mono">PLAN</text>
-        <view class="plan-chev" :class="{ open: planOpen }" />
+        <MossIcon class="plan-chev" :class="{ open: planOpen }" name="chev" :size="12" />
       </view>
       <view v-if="planOpen" class="plan-list">
         <view v-for="(st, i) in planSteps" :key="i" class="plan-item" :class="st.status">
@@ -1489,7 +1492,7 @@ onUnmounted(() => {
     <view v-if="todoItems.length > 0 && !todoAllDone && planSteps.length === 0" class="plan-bar">
       <view class="plan-head">
         <text class="plan-t">任务 {{ todoDone }}/{{ todoItems.length }}</text>
-        <view class="plan-chev" :class="{ open: planOpen }" @tap="planOpen = !planOpen" />
+        <view class="plan-chev" :class="{ open: planOpen }" @tap="planOpen = !planOpen"><MossIcon name="chev" :size="12" /></view>
       </view>
       <view v-if="planOpen" class="plan-list">
         <view v-for="(t, i) in todoItems" :key="i" class="plan-item" :class="t.status">
@@ -1503,7 +1506,7 @@ onUnmounted(() => {
     <view v-if="askCard" class="ask-bar">
       <view class="ask-head">
         <text class="ask-q">{{ askCard.questions[askIndex]?.question }}</text>
-        <text class="ask-x" @tap="askCard = undefined">×</text>
+        <view class="ask-x" @tap="askCard = undefined"><MossIcon name="close" :size="12" /></view>
       </view>
       <text v-if="askCard.questions.length > 1" class="ask-progress mono">
         {{ askIndex + 1 }} / {{ askCard.questions.length }}
@@ -1539,7 +1542,7 @@ onUnmounted(() => {
     <!-- 断线横幅：一直在，直到连上 -->
     <view v-if="linkDown" class="conn-bar" @tap="reconnectNow">
       <text class="conn-t">已断开连接 · 点此重连</text>
-      <view class="conn-chev" />
+      <MossIcon name="chev" :size="12" />
     </view>
 
     <!-- 发送失败：贴在输入框上方，别让用户找不到 -->
@@ -1564,7 +1567,7 @@ onUnmounted(() => {
           <text class="attach-kind mono">{{ a.kind === 'image' ? 'IMG' : 'FILE' }}</text>
           <text class="attach-name">{{ a.name }}</text>
           <text class="attach-size mono">{{ a.uploading ? '上传中' : a.error ?? humanBytes(a.bytes) }}</text>
-          <text class="attach-x" @tap="removeAttach(i)">×</text>
+          <view class="attach-x" @tap="removeAttach(i)"><MossIcon name="close" :size="11" /></view>
         </view>
       </view>
 
@@ -1582,7 +1585,7 @@ onUnmounted(() => {
           class="send stop on"
           @tap="cancelRun"
         >
-          <view class="ico-stop" />
+          <MossIcon class="ico-stop" name="stop" :size="15" />
         </view>
         <view
           v-else
@@ -1593,7 +1596,7 @@ onUnmounted(() => {
           }"
           @tap="send"
         >
-          <view class="ico-up" />
+          <MossIcon class="ico-up" name="send" :size="15" />
         </view>
       </view>
     </view>
@@ -1612,7 +1615,7 @@ onUnmounted(() => {
           <text class="mono t3">{{ fileItems.length }}</text>
         </view>
         <view class="rail-toggle" @tap="rightOpen = !rightOpen">
-          <view class="chev-r" :class="{ open: rightOpen }" />
+          <MossIcon name="chev" :size="12" :class="{ open: rightOpen }" />
         </view>
       </view>
       <view
@@ -1702,16 +1705,6 @@ onUnmounted(() => {
 
 .back-hover { opacity: 0.6; }
 
-/* 左箭头：8×8 的方块，只留左边与下边，旋转 45° */
-.chev {
-  width: 9px;
-  height: 9px;
-  border-left: 2px solid var(--t2);
-  border-bottom: 2px solid var(--t2);
-  transform: rotate(45deg);
-  margin-left: 4px;
-}
-
 .top-mid { flex: 1; min-width: 0; }
 .tt {
   display: block;
@@ -1762,9 +1755,6 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  color: var(--t3);
-  font-size: 14px;
-  line-height: 1;
 }
 
 .ctx-x:active { background: var(--s2); color: var(--t1); }
@@ -1861,17 +1851,12 @@ onUnmounted(() => {
 
 .rail-toggle:active { background: var(--s2); }
 
-/* 折叠箭头：CSS 画的 < > */
-.chev-r {
-  width: 7px;
-  height: 7px;
-  border-right: 1.7px solid var(--t2);
-  border-bottom: 1.7px solid var(--t2);
+/* 折叠箭头：预渲染线稿。展开时转 135° 变成"向里收" */
+.rail-toggle .mi {
   transform: rotate(-45deg);
-  margin-left: 2px;
   transition: transform var(--t-fast) var(--ease-out);
 }
-.chev-r.open { transform: rotate(135deg); margin-left: -2px; }
+.rail-toggle .mi.open { transform: rotate(135deg); }
 
 .rail-collapsed {
   writing-mode: vertical-rl;
@@ -2122,22 +2107,10 @@ onUnmounted(() => {
 .queue { font-size: 10.5px; }
 
 /* 发送箭头：CSS 画的向上箭头 */
-.ico-up {
-  width: 10px;
-  height: 10px;
-  border-left: 2px solid currentColor;
-  border-top: 2px solid currentColor;
-  transform: rotate(45deg);
-  margin-top: 3px;
-}
-
-/* 停止方块 */
-.ico-stop {
-  width: 9px;
-  height: 9px;
-  border-radius: 1.5px;
-  background: currentColor;
-}
+/* 图标改为预渲染线稿（MossIcon），发送键的箭头在三种状态下颜色不同，
+   用 currentColor 已经没意义了 —— 改成按 .send 的状态压透明度。 */
+.ico-up, .ico-stop { flex: none; }
+.send.is-disabled .ico-up { opacity: 0.4; }
 
 
 
@@ -2180,7 +2153,7 @@ onUnmounted(() => {
 }
 
 .attach-size { font-size: 10px; color: var(--t3); }
-.attach-x { font-size: 14px; color: var(--t3); padding: 0 2px; }
+.attach-x { flex: none; display: grid; place-items: center; padding: 0 2px; }
 
 .queue-dock {
   width: 100%;
@@ -2253,13 +2226,7 @@ onUnmounted(() => {
 .browse-row:active { background: var(--s2); }
 .browse-t { font-size: 12.5px; color: var(--acc); }
 
-.chev {
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid var(--acc);
-  border-top: 1.5px solid var(--acc);
-  transform: rotate(45deg);
-}
+.chev { flex: none; }
 
 .changes-note {
   padding: 8px 0 4px;
@@ -2322,7 +2289,7 @@ onUnmounted(() => {
   gap: 7px;
 }
 .ask-head { display: flex; align-items: flex-start; gap: 10px; }
-.ask-x { flex: none; width: 24px; height: 24px; text-align: center; line-height: 22px; font-size: 17px; color: var(--t3); }
+.ask-x { flex: none; width: 24px; height: 24px; display: grid; place-items: center; }
 .ask-q { flex: 1; font-size: 12.5px; line-height: 19px; color: var(--t1); }
 .ask-opt {
   padding: 7px 10px;
@@ -2353,12 +2320,13 @@ onUnmounted(() => {
 
 .plan-chev {
   margin-left: auto;
-  width: 6px; height: 6px;
-  border-right: 1.5px solid var(--t3);
-  border-top: 1.5px solid var(--t3);
-  transform: rotate(135deg);
+  display: grid;
+  place-items: center;
+  opacity: 0.7;
+  transform: rotate(90deg);
+  transition: transform 160ms ease-out;
 }
-.plan-chev.open { transform: rotate(-45deg); }
+.plan-chev.open { transform: rotate(-90deg); opacity: 1; }
 
 .plan-list { margin-top: 6px; }
 .plan-item { display: flex; gap: 7px; padding: 3px 0; }
@@ -2396,14 +2364,7 @@ onUnmounted(() => {
 
 .conn-t { font-size: 12px; color: var(--warn, #e6b43c); }
 
-.conn-chev {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid var(--warn, #e6b43c);
-  border-top: 1.5px solid var(--warn, #e6b43c);
-  transform: rotate(45deg);
-}
+.conn-chev { flex: none; }
 
 /* 发送失败常驻到下次发送成功：贴在输入框正上方，视线必经处 */
 .send-bar {

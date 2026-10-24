@@ -16,6 +16,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
+import MossTex from '@/components/moss/MossTex.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import MossMarkdown from '@/components/MossMarkdown.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import {
@@ -388,6 +390,7 @@ onMounted(selectFirstForWide)
       <view class="workspace">
         <!-- 宽屏（PC 档）笔记本列表：手机走上面的 chips，两处共用同一套筛选状态 -->
         <view class="nb-col">
+          <MossTex name="nbcol" />
           <view class="nb-head">
             <text class="nb-head-t">笔记本</text>
             <text class="nb-head-n mono">{{ data.notes.length }}</text>
@@ -419,7 +422,7 @@ onMounted(selectFirstForWide)
 
         <view :key="filter" class="list-col">
           <view v-if="filteredNotes.length === 0" class="empty fb-empty">
-            <text class="fb-empty-icon">▤</text>
+            <MossIcon class="fb-empty-icon" name="note" :size="26" />
             <text>这里还没有笔记。</text>
             <text class="empty-hint">点右上「新建」写下第一篇，或切换其它笔记本。</text>
           </view>
@@ -431,10 +434,11 @@ onMounted(selectFirstForWide)
             :class="[{ on: n.id === readingId }, index < 8 ? `fb-stagger fb-i-${index}` : '']"
             @tap="openNote(n.id)"
           >
+            <MossTex name="note" fit="contain" />
             <view class="nc-top">
               <text class="nc-title">{{ n.title || '未命名笔记' }}</text>
               <view class="star fb-press" :class="{ on: n.fav }" @tap.stop="toggleFav(n.id)">
-                <text>{{ n.fav ? '★' : '☆' }}</text>
+                <MossIcon name="star" :size="13" :fill="n.fav" />
               </view>
             </view>
             <view class="nc-sum"><text>{{ summary(n) || '空白笔记 · 点开读或写' }}</text></view>
@@ -446,7 +450,7 @@ onMounted(selectFirstForWide)
               </view>
               <!-- 右下「预览」：直接进整页预览，不经过编辑器；stop 防止连带进阅读态 -->
               <view class="nc-pv fb-press" @tap.stop="openPreview(n.id)">
-                <text class="nc-pv-ic">▤</text>
+                <MossIcon class="nc-pv-ic" name="note" :size="13" />
                 <text class="nc-pv-tx">预览</text>
               </view>
             </view>
@@ -456,13 +460,14 @@ onMounted(selectFirstForWide)
         <!-- 阅读态：标题 + 渲染后的 Markdown；右上「编辑」进整页编辑器 -->
         <view v-if="readingNote" class="read-col">
           <view class="reader">
+            <MossTex name="reader" fit="contain" />
             <view class="rd-toolbar">
-              <view class="rd-back" @tap="closeReader"><text>‹</text></view>
+              <view class="rd-back" @tap="closeReader"><MossIcon name="chev" :size="16" flip /></view>
               <text class="nb-tag">{{ readingNote.notebook }}</text>
               <text class="rd-time mono">{{ timeLabel(readingNote.updatedAt) }}</text>
               <view class="sp" />
               <view class="rd-star fb-press" :class="{ on: readingNote.fav }" @tap="toggleFav(readingNote.id)">
-                <text>{{ readingNote.fav ? '★' : '☆' }}</text>
+                <MossIcon name="star" :size="13" :fill="readingNote.fav" />
               </view>
               <view class="rd-edit fb-press" @tap="openEditor(readingNote.id)"><text>编辑</text></view>
             </view>
@@ -488,7 +493,8 @@ onMounted(selectFirstForWide)
         </view>
 
         <view v-else class="read-placeholder">
-          <text class="ph-mark">▤</text>
+          <MossTex name="placeholder" fit="contain" />
+          <MossIcon class="ph-mark" name="note" :size="22" />
           <text class="ph-title">点开一篇笔记先读</text>
           <text class="ph-sub">阅读态渲染 Markdown；右上「编辑」进入整页编辑。</text>
         </view>
@@ -642,12 +648,20 @@ onMounted(selectFirstForWide)
 /* ── 卡片：高度完全由内容撑开（不写 height，标题 2 行 / 摘要 3 行截断） ── */
 .note-card {
   position: relative;
+  overflow: hidden;
   padding: 14px;
   margin-bottom: 10px;
   border-radius: var(--r-md);
   background: var(--s1);
   border: 1px solid var(--bd);
   transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out), border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+}
+/* 卡片内容压在纹理之上 */
+.note-card > .nc-top,
+.note-card > .nc-sum,
+.note-card > .nc-foot {
+  position: relative;
+  z-index: 1;
 }
 .note-card:active { transform: scale(0.995); }
 .note-card.on {
@@ -725,12 +739,8 @@ onMounted(selectFirstForWide)
   color: var(--acc);
   border-color: var(--bd-strong);
 }
-.nc-pv-ic {
-  font-size: 10.5px;
-  line-height: 1;
-  color: var(--t3);
-}
-.nc-pv:active .nc-pv-ic { color: var(--acc); }
+.nc-pv-ic { flex: none; opacity: 0.7; }
+.nc-pv:active .nc-pv-ic { opacity: 1; }
 .nc-pv-tx { line-height: 1; }
 .nb-tag {
   flex: 0 0 auto;
@@ -770,6 +780,7 @@ onMounted(selectFirstForWide)
 /* ── 阅读态 ── */
 .read-col { display: none; }
 .reader {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -778,6 +789,12 @@ onMounted(selectFirstForWide)
   border: 1px solid var(--bd);
   border-radius: var(--r-lg);
   overflow: hidden;
+}
+/* 阅读内容压在纹理之上 */
+.reader > .rd-toolbar,
+.reader > .rd-body {
+  position: relative;
+  z-index: 1;
 }
 .rd-toolbar {
   display: flex;
@@ -870,6 +887,8 @@ onMounted(selectFirstForWide)
 
 .read-placeholder {
   display: none;
+  position: relative;
+  overflow: hidden;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -880,7 +899,14 @@ onMounted(selectFirstForWide)
   border-radius: var(--r-lg);
   color: var(--t3);
 }
-.ph-mark { font-size: 30px; color: var(--acc); opacity: 0.7; animation: ph-breathe 1.6s ease-in-out infinite; }
+/* 占位文字压在纹理之上 */
+.read-placeholder > .ph-mark,
+.read-placeholder > .ph-title,
+.read-placeholder > .ph-sub {
+  position: relative;
+  z-index: 1;
+}
+.ph-mark { display: block; margin: 0 auto; animation: ph-breathe 1.6s ease-in-out infinite; }
 @keyframes ph-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .ph-title { font-size: 13px; font-weight: 600; color: var(--t2); }
 .ph-sub { font-size: 10.5px; line-height: 1.7; text-align: center; padding: 0 24px; }
@@ -938,6 +964,8 @@ onMounted(selectFirstForWide)
 @media (min-width: 1100px) {
   .nb-col {
     display: flex;
+    position: relative;
+    overflow: hidden;
     flex-direction: column;
     flex: 0 0 176px;
     width: 176px;
@@ -946,6 +974,13 @@ onMounted(selectFirstForWide)
     background: var(--s1);
     border: 1px solid var(--bd);
     box-sizing: border-box;
+  }
+  /* 侧栏内容压在纹理之上 */
+  .nb-col > .nb-head,
+  .nb-col > .nb-row,
+  .nb-col > .nb-add {
+    position: relative;
+    z-index: 1;
   }
   .chips { display: none; }
   .list-col {

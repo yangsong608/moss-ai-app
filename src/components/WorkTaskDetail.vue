@@ -28,6 +28,7 @@ import {
 } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
 import { stashContext } from '@/core/ai-context'
+import MossIcon from '@/components/moss/MossIcon.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -363,7 +364,7 @@ function askAi(): void {
 
       <view class="head">
         <text class="kicker mono">任务详情</text>
-        <view class="x" @tap="close"><text class="xg">✕</text></view>
+        <view class="x" @tap="close"><MossIcon name="close" :size="13" /></view>
       </view>
 
       <scroll-view scroll-y class="body">
@@ -422,7 +423,7 @@ function askAi(): void {
               <text class="cl">日期</text>
               <picker mode="date" :value="t.date || todayIso" @change="onPickDate">
                 <view class="datechip mono">
-                  <text class="dcg">▦</text>
+                  <MossIcon class="dcg" name="cal" :size="12" />
                   <text>{{ dateLabel }}</text>
                 </view>
               </picker>
@@ -476,13 +477,13 @@ function askAi(): void {
               :class="{ done: s.done }"
               @tap="onSubToggle(s.id)"
             >
-              <view class="sc" :class="{ on: s.done }"><text class="sg">✓</text></view>
+              <view class="sc" :class="{ on: s.done }"><MossIcon name="check" :size="11" tint="done" /></view>
               <text class="sub-t">{{ s.title }}</text>
-              <view class="sub-x" @tap.stop="removeSub(s.id)"><text>✕</text></view>
+              <view class="sub-x" @tap.stop="removeSub(s.id)"><MossIcon name="close" :size="11" /></view>
             </view>
 
             <view class="subadd">
-              <view class="plus"><text>＋</text></view>
+              <view class="plus"><MossIcon name="plus" :size="13" /></view>
               <input
                 :key="subKey"
                 v-model="subDraft"
@@ -492,7 +493,7 @@ function askAi(): void {
                 :maxlength="80"
                 @confirm="addSub"
               />
-              <view class="subgo" @tap="addSub"><text>＋</text></view>
+              <view class="subgo" @tap="addSub"><MossIcon name="plus" :size="14" /></view>
             </view>
           </view>
 
@@ -621,7 +622,7 @@ function askAi(): void {
 }
 
 .x:active { color: var(--t1); background: var(--s3); }
-.xg { font-size: 12px; line-height: 1; }
+.xg { display: grid; place-items: center; }
 
 .body {
   flex: 1 1 auto;
@@ -820,7 +821,7 @@ function askAi(): void {
   font-size: 10.5px;
 }
 
-.dcg { font-size: 10px; color: var(--t3); }
+.dcg { flex: none; display: grid; place-items: center; }
 
 .minibtn {
   height: 26px;
@@ -886,7 +887,7 @@ function askAi(): void {
   color: var(--acc-ink);
 }
 
-.sg { font-size: 10px; line-height: 1; }
+.sg { display: grid; place-items: center; }
 
 .sub-t {
   flex: 1;

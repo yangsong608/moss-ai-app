@@ -10,3 +10,22 @@ unpackage/
 .vscode/
 # 3D 模型是外部仓库的符号链接，不进仓库（见 tools/moss-render/README.md）
 tools/moss-render/assets3d
+
+# AI 生成的主图母版：体积大（灰度化后仍有 22MB），且可由 AI 重新生成。
+# 入库的是产物（src/static/moss/tex|icon/*.webp，共 1.8MB）+ 皮肤清单
+# （tools/moss-render/raw-skin.json），母版本身留在本地即可。
+tools/moss-render/raw/
+tools/moss-render/raw-icons/
+
+# Python 字节码
+__pycache__/
+*.pyc
+
+# Agent 工作目录（记忆与中间产物，不属于工程源码）
+.workbuddy/
+
+# 纹理改动前的本地暂存
+.tex-stash/
+
+# 一次性诊断产物（ab-preview.py 生成的 A/B 对照图，可随时重新生成）
+tools/moss-render/ab-preview.png

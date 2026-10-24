@@ -34,6 +34,7 @@ import { onHide, onShow } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import {
   STATUS_META,
   WEEKDAYS,
@@ -1769,9 +1770,9 @@ watch(calView, (v) => {
       <!-- 周 / 月切换与翻页 -->
       <view class="calbar">
         <view class="navgrp">
-          <view class="nav-b" @tap="shift(-1)"><text class="nav-g">‹</text></view>
+          <view class="nav-b" @tap="shift(-1)"><MossIcon class="nav-g" name="chev" :size="16" flip /></view>
           <text class="mono wk">{{ barLabel }}</text>
-          <view class="nav-b" @tap="shift(1)"><text class="nav-g">›</text></view>
+          <view class="nav-b" @tap="shift(1)"><MossIcon class="nav-g" name="chev" :size="16" /></view>
         </view>
         <view class="sp" />
         <view class="today-btn" @tap="goToday"><text>今天</text></view>
@@ -1849,7 +1850,7 @@ watch(calView, (v) => {
                 >
                   <text class="et">{{ ev.title }}</text>
                   <view class="efoot">
-                    <text v-if="hasBell(ev.id)" class="bell">🔔</text>
+                    <MossIcon v-if="hasBell(ev.id)" class="bell" name="bell" :size="10" tint="warn" />
                     <text class="eh mono">{{ ev.range }}</text>
                   </view>
                 </view>
@@ -1888,13 +1889,13 @@ watch(calView, (v) => {
 
       <!-- 选中日期的安排：卡片头部（标题 + 农历 + 前后一天） -->
       <view class="sect">
-        <view class="daynav fb-press" role="button" aria-label="前一天" @tap="pageDay(-1)"><text class="dnav-g">‹</text></view>
+        <view class="daynav fb-press" role="button" aria-label="前一天" @tap="pageDay(-1)"><MossIcon class="dnav-g" name="chev" :size="14" flip /></view>
         <text class="st">{{ agendaTitle }}</text>
         <!-- 农历紧跟公历日期；超出农历表范围时 lunarLabel 为空串，整段不渲染 -->
         <text v-if="lunarLabel !== ''" class="alunar">{{ lunarLabel }}</text>
         <text class="mono sn">{{ agenda.length }} 项</text>
         <view class="line" />
-        <view class="daynav fb-press" role="button" aria-label="后一天" @tap="pageDay(1)"><text class="dnav-g">›</text></view>
+        <view class="daynav fb-press" role="button" aria-label="后一天" @tap="pageDay(1)"><MossIcon class="dnav-g" name="chev" :size="14" /></view>
       </view>
 
       <view class="card">
@@ -1908,7 +1909,7 @@ watch(calView, (v) => {
           @touchend="onAgendaSwipeEnd"
           @touchcancel="onAgendaSwipeCancel"
         >
-          <view v-if="agenda.length === 0" class="aempty fb-empty"><text class="fb-empty-icon">▦</text><text>在下方输入安排，选好时间后点「＋」</text></view>
+          <view v-if="agenda.length === 0" class="aempty fb-empty"><MossIcon class="fb-empty-icon" name="cal" :size="26" /><text>在下方输入安排，选好时间后点「＋」</text></view>
           <view
             v-for="(a, index) in agenda"
             :key="a.id"
@@ -1925,13 +1926,13 @@ watch(calView, (v) => {
                 <text> · {{ a.dev }}</text>
               </text>
               <text class="an">
-                <text v-if="a.done" class="acheck">✓</text>
-                <text v-if="a.bell" class="bell">🔔 </text>
+                <MossIcon v-if="a.done" class="acheck" name="check" :size="11" tint="done" />
+                <MossIcon v-if="a.bell" class="bell" name="bell" :size="11" tint="warn" />
                 <text class="atitle">{{ a.title }}</text>
               </text>
             </view>
             <text class="achip" :style="'color:' + a.st + ';border-color:' + a.st">{{ a.stLabel }}</text>
-            <text class="ago">›</text>
+            <MossIcon class="ago" name="chev" :size="12" />
           </view>
         </view>
 
@@ -1948,7 +1949,7 @@ watch(calView, (v) => {
           <picker mode="time" :value="quickTime" @change="onPickTime">
             <view class="atime mono"><text>{{ quickTime }}</text></view>
           </picker>
-          <view class="aadd fb-press" :class="{ 'fb-disabled': quickTitle.trim() === '' }" :aria-disabled="quickTitle.trim() === ''" @tap="quickAdd"><text class="aadd-g">＋</text></view>
+          <view class="aadd fb-press" :class="{ 'fb-disabled': quickTitle.trim() === '' }" :aria-disabled="quickTitle.trim() === ''" @tap="quickAdd"><MossIcon class="aadd-g" name="plus" :size="18" /></view>
         </view>
       </view>
 
@@ -2369,7 +2370,7 @@ watch(calView, (v) => {
   min-width: 0;
 }
 
-.bell { font-size: 8px; line-height: 1; opacity: 0.9; }
+.bell { flex: none; opacity: 0.9; }
 
 .eh {
   display: block;
@@ -2606,7 +2607,7 @@ watch(calView, (v) => {
 }
 
 .daynav:active { background: var(--s2); color: var(--acc); }
-.dnav-g { font-size: 13px; line-height: 1; }
+.dnav-g { flex: none; }
 
 /* 农历：与公历日期同一行，弱于标题但比灰字更亮一点 */
 .alunar {
@@ -2710,8 +2711,8 @@ watch(calView, (v) => {
 
 .ago {
   align-self: center;
-  font-size: 15px;
-  color: var(--t3);
+  flex: none;
+  opacity: 0.6;
 }
 
 .aempty {

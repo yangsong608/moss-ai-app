@@ -13,6 +13,8 @@ import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { onHide, onShow } from '@dcloudio/uni-app'
 import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
+import MossTex from '@/components/moss/MossTex.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import {
   STATUS_META,
   WEEKDAYS,
@@ -678,6 +680,7 @@ function doClear(): void {
     <view class="today">
       <!-- 大日期卡 + 环形进度（点击清已完成） -->
       <view class="hero">
+        <MossTex name="hero" />
         <view class="hero-main">
           <text class="eyebrow">{{ weekday }} · 今天</text>
           <view class="hdateline">
@@ -707,21 +710,24 @@ function doClear(): void {
       <!-- 三个彩色指标 -->
       <view class="stats">
         <view class="stat">
-          <view class="si acc"><text class="sig">✓</text></view>
+          <MossTex name="stat" />
+          <view class="si acc"><MossIcon name="check" :size="13" /></view>
           <view class="sbody">
             <text class="mono sn">{{ doneToday }}</text>
             <text class="sl">今日完成</text>
           </view>
         </view>
         <view class="stat">
-          <view class="si warn"><text class="sig">◷</text></view>
+          <MossTex name="stat" />
+          <view class="si warn"><MossIcon name="clock" :size="13" tint="warn" /></view>
           <view class="sbody">
             <text class="mono sn">{{ pendingFocus }}</text>
             <text class="sl">待专注</text>
           </view>
         </view>
         <view class="stat">
-          <view class="si danger"><text class="sig">!</text></view>
+          <MossTex name="stat" />
+          <view class="si danger"><MossIcon name="alert" :size="13" tint="danger" /></view>
           <view class="sbody">
             <text class="mono sn">{{ highPri }}</text>
             <text class="sl">高优先</text>
@@ -731,6 +737,7 @@ function doClear(): void {
 
       <!-- 快速记录 -->
       <view class="quick">
+        <MossTex name="quick" />
         <view class="quickin">
           <text class="qplus">＋</text>
           <input
@@ -760,13 +767,15 @@ function doClear(): void {
       <view class="calwrap">
         <!-- 台历日页：头部可前后翻页，卡片按时间堆叠（保留原任务卡片样式） -->
         <view class="calpage" :class="pageFlip !== '' ? `flip-${pageFlip}` : ''">
+          <MossTex name="calpage" />
           <view class="calbind">
             <view v-for="i in 11" :key="i" class="hole" />
           </view>
 
           <view class="calhead">
-            <view class="daynav" role="button" aria-label="前一天" @tap="pageDay(-1)"><text class="dnav-g">‹</text></view>
+            <view class="daynav" role="button" aria-label="前一天" @tap="pageDay(-1)"><MossIcon class="dnav-g" name="chev" :size="14" flip /></view>
             <view class="caldate">
+              <MossTex name="caldate" />
               <text class="calmonth mono">{{ viewMD.month }}</text>
               <text class="calbig mono">{{ viewMD.day }}</text>
             </view>
@@ -777,7 +786,7 @@ function doClear(): void {
               </view>
               <text class="calcoun mono">{{ todayCards.length }} 项{{ viewDone > 0 ? ` · 已完成 ${viewDone}` : '' }}</text>
             </view>
-            <view class="daynav" role="button" aria-label="后一天" @tap="pageDay(1)"><text class="dnav-g">›</text></view>
+            <view class="daynav" role="button" aria-label="后一天" @tap="pageDay(1)"><MossIcon class="dnav-g" name="chev" :size="14" /></view>
           </view>
 
           <view v-if="!isViewToday" class="calback" @tap="backToToday"><text>‹ 回到今天</text></view>
@@ -790,6 +799,7 @@ function doClear(): void {
               :class="[{ done: t.done }, ...taskFeedbackClass(t, index, t.done)]"
               @longpress="openRowMenu(t)"
             >
+              <MossTex name="flipcard" fit="contain" />
               <view class="fc-top">
                 <text class="fc-when mono" :class="{ due: isDue(t) }">{{ t.when }}</text>
                 <text class="fc-st" :style="statusChipStyle(t)">{{ statusLabel(t) }}</text>
@@ -826,7 +836,7 @@ function doClear(): void {
 
               <view class="fc-tags">
                 <view v-for="tag in t.tags" :key="tag" class="fc-tag" @tap.stop="removeTag(t, tag)">
-                  <text>#{{ tag }}</text><text class="fc-tag-x">✕</text>
+                  <text>#{{ tag }}</text><MossIcon class="fc-tag-x" name="close" :size="10" />
                 </view>
                 <view v-if="tagEditing && editRowId === t.id" class="fc-tag-in-wrap">
                   <input
@@ -857,7 +867,7 @@ function doClear(): void {
             </view>
 
             <view v-if="todayCards.length === 0" class="flipempty fb-empty">
-              <text class="fb-empty-icon">{{ isViewToday ? '☀' : '▦' }}</text>
+              <MossIcon class="fb-empty-icon" :name="isViewToday ? 'sun' : 'cal'" :size="26" />
               <text>{{ isViewToday ? '今天还没有安排' : '这一天没有任务' }}</text>
               <text class="fe-d">左右滑动或点箭头翻页</text>
             </view>
@@ -889,42 +899,52 @@ function doClear(): void {
 
     <!-- 长按操作菜单（页面自绘，与全应用弹层观感一致） -->
     <view v-if="menuOpen" class="mask menu-mask" @tap="closeMenu">
-      <view class="menu" @tap.stop>
-        <view class="grab" />
-        <view class="menu-head">
-          <text class="menu-title">{{ menuTask?.title ?? '任务' }}</text>
-          <text class="menu-sub">选择要做的操作</text>
-        </view>
-        <view class="menu-item" @tap="editFromMenu">
-          <view class="mi-ic"><text>✎</text></view>
-          <view class="mi-body">
-            <text class="mi-t">编辑</text>
-            <text class="mi-h">打开任务详情，改标题 / 日期 / 子待办</text>
+      <!--
+        两层结构：menu-shell 是"面板"（负责圆角裁切与纹理定位），
+        menu 是"内容区"（负责滚动）。如果只有一层，滚动时纹理会跟着走。
+      -->
+      <view class="menu-shell" @tap.stop>
+        <MossTex name="menu" />
+        <view class="menu">
+          <view class="grab" />
+          <view class="menu-head">
+            <text class="menu-title">{{ menuTask?.title ?? '任务' }}</text>
+            <text class="menu-sub">选择要做的操作</text>
           </view>
-          <view class="chev" />
-        </view>
-        <view class="menu-sep" />
-        <view class="menu-item danger" @tap="deleteFromMenu">
-          <view class="mi-ic"><text>✕</text></view>
-          <view class="mi-body">
-            <text class="mi-t">删除</text>
-            <text class="mi-h">从当前设备域移除，并同步到其它端</text>
+          <view class="menu-item" @tap="editFromMenu">
+            <view class="mi-ic"><text>✎</text></view>
+            <view class="mi-body">
+              <text class="mi-t">编辑</text>
+              <text class="mi-h">打开任务详情，改标题 / 日期 / 子待办</text>
+            </view>
+            <view class="chev" />
           </view>
+          <view class="menu-sep" />
+          <view class="menu-item danger" @tap="deleteFromMenu">
+            <view class="mi-ic"><MossIcon name="close" :size="13" /></view>
+            <view class="mi-body">
+              <text class="mi-t">删除</text>
+              <text class="mi-h">从当前设备域移除，并同步到其它端</text>
+            </view>
+          </view>
+          <view class="menu-cancel" @tap="closeMenu"><text>取消</text></view>
         </view>
-        <view class="menu-cancel" @tap="closeMenu"><text>取消</text></view>
       </view>
     </view>
 
     <!-- 删除任务：二次确认 -->
     <view v-if="deleteTarget !== null" class="mask" @tap="cancelDelete">
-      <view class="modal" @tap.stop>
-        <text class="mh">删除「{{ deleteTarget.title }}」？</text>
-        <text class="mb">
-          会从「{{ deviceName() }}」数据域移除这条任务，并打 tombstone 同步到其他端。删除后不可撤销；只想从清单收走的话，用「完成」。
-        </text>
-        <view class="mf">
-          <view class="btn ghost" @tap="cancelDelete"><text>取消</text></view>
-          <view class="btn danger" @tap="confirmDelete"><text>删除任务</text></view>
+      <view class="modal-shell" @tap.stop>
+        <MossTex name="modal" />
+        <view class="modal">
+          <text class="mh">删除「{{ deleteTarget.title }}」？</text>
+          <text class="mb">
+            会从「{{ deviceName() }}」数据域移除这条任务，并打 tombstone 同步到其他端。删除后不可撤销；只想从清单收走的话，用「完成」。
+          </text>
+          <view class="mf">
+            <view class="btn ghost" @tap="cancelDelete"><text>取消</text></view>
+            <view class="btn danger" @tap="confirmDelete"><text>删除任务</text></view>
+          </view>
         </view>
       </view>
     </view>
@@ -934,14 +954,17 @@ function doClear(): void {
 
     <!-- 清已完成：二次确认 -->
     <view v-if="clearOpen" class="mask" @tap="clearOpen = false">
-      <view class="modal" @tap.stop>
-        <text class="mh">清掉已完成？</text>
-        <text class="mb">
-          将从「{{ deviceName() }}」数据域移除 {{ stats.done }} 项已完成任务。本机立即生效，M2 同步后其他设备跟随。
-        </text>
-        <view class="mf">
-          <view class="btn ghost" @tap="clearOpen = false"><text>取消</text></view>
-          <view class="btn primary" @tap="doClear"><text>清掉 {{ stats.done }} 项</text></view>
+      <view class="modal-shell" @tap.stop>
+        <MossTex name="modal" />
+        <view class="modal">
+          <text class="mh">清掉已完成？</text>
+          <text class="mb">
+            将从「{{ deviceName() }}」数据域移除 {{ stats.done }} 项已完成任务。本机立即生效，M2 同步后其他设备跟随。
+          </text>
+          <view class="mf">
+            <view class="btn ghost" @tap="clearOpen = false"><text>取消</text></view>
+            <view class="btn primary" @tap="doClear"><text>清掉 {{ stats.done }} 项</text></view>
+          </view>
         </view>
       </view>
     </view>
@@ -961,6 +984,7 @@ function doClear(): void {
 
 .hero {
   position: relative;
+  overflow: hidden; /* 纹理层是 absolute 铺满，不裁会溢出圆角 */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -968,6 +992,17 @@ function doClear(): void {
   border-radius: var(--r-lg);
   border: 1px solid var(--bd);
   background: linear-gradient(160deg, var(--s1), var(--s2));
+}
+
+/*
+ * 纹理层之后的直接子元素要压到纹理之上。
+ * MossTex 自己是 z-index:0，这里给内容 z-index:1 ——
+ * 不写的话，后出现的 <image> 会盖住先出现的文字（同层按 DOM 顺序叠）。
+ */
+.hero > .hero-main,
+.hero > .ring {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-main {
@@ -1094,6 +1129,8 @@ function doClear(): void {
 }
 
 .stat {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1102,6 +1139,13 @@ function doClear(): void {
   border-radius: var(--r-md);
   border: 1px solid var(--bd);
   background: var(--s1);
+}
+
+/* 纹理层在卡片内容之下 */
+.stat > .si,
+.stat > .sbody {
+  position: relative;
+  z-index: 1;
 }
 
 .si {
@@ -1140,10 +1184,24 @@ function doClear(): void {
 
 /* ── 快速记录 ───────────────────────────────────────────────────── */
 
+/*
+ * 纹理层之后的直接子元素要压到纹理之上。
+ * MossTex 自己是 z-index:0，这里给内容 z-index:1 ——
+ * 不写的话，后出现的 <image> 会盖住先出现的文字（同层按 DOM 顺序叠）。
+ */
+
 .quick {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--r-lg);
   border: 1px solid var(--bd);
   background: var(--s1);
+}
+
+.quick > .quickin,
+.quick > .quickhint {
+  position: relative;
+  z-index: 1;
 }
 
 .quickin {
@@ -1242,6 +1300,8 @@ function doClear(): void {
 
 /* 装订条 + 打孔 */
 .calbind {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-evenly;
@@ -1259,25 +1319,54 @@ function doClear(): void {
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--t1) 30%, transparent), 0 1px 0 color-mix(in srgb, var(--s1) 80%, transparent);
 }
 
+/*
+ * 台历卡的所有内容层都要压在纹理层之上。
+ * MossTex 是 z-index:0 的绝对定位兄弟节点，不写 z-index 的话
+ * 同层按 DOM 顺序叠，纹理会盖住文字。
+ */
+.calhead,
+.calback,
+.cardlist,
+.calnav,
+.calfold {
+  position: relative;
+  z-index: 1;
+}
+
 /* 日期块 */
 .calhead {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 14px 10px;
+  /* 台历头是实底：日期块、标题、翻页箭头都在这一行，
+     台历网格纹理会从下面透上来，必须挡住。 */
+  background: var(--s1);
 }
 
 .caldate {
+  position: relative;
+  overflow: hidden;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* 内容上移、底部多留 9px：给月相纹理一条落点（旧版居中，数字占到底只剩 5px） */
+  justify-content: flex-start;
+  padding: 5px 8px 12px;
   min-width: 56px;
-  padding: 6px 8px;
   border-radius: 12px;
   background: var(--acc-soft);
   border: 1px solid color-mix(in srgb, var(--acc) 26%, transparent);
+}
+
+/* 日期块内容压在纹理之上 */
+.caldate > .calmonth,
+.caldate > .calbig {
+  position: relative;
+  z-index: 1;
 }
 
 .calmonth { font-size: 8px; letter-spacing: 0.12em; color: var(--acc); text-transform: uppercase; }
@@ -1314,7 +1403,11 @@ function doClear(): void {
   justify-content: space-between;
   padding: 8px 14px 10px;
   border-top: 1px solid var(--bd);
-  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--s2) 70%, transparent));
+  /* 台历卡底栏：台历网格纹理会从卡片缝隙透出，底栏是实底，
+     否则网格线会划过这行 7px 的小字。 */
+  background: var(--s1);
+  position: relative;
+  z-index: 1;
 }
 .calfoot-t { font-size: 7px; letter-spacing: 0.18em; color: var(--t3); }
 .calfoot-d { font-size: 8px; color: var(--t3); }
@@ -1392,7 +1485,7 @@ function doClear(): void {
   color: var(--t2);
   font-size: 9.5px;
 }
-.fc-tag-x { font-size: 8px; opacity: 0.55; }
+.fc-tag-x { flex: none; opacity: 0.55; }
 .fc-tag-add {
   padding: 3px 9px;
   border-radius: 999px;
@@ -1469,6 +1562,7 @@ function doClear(): void {
 
 .flipcard {
   position: relative;
+  overflow: hidden;
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -1482,6 +1576,16 @@ function doClear(): void {
     var(--s1);
   box-shadow: 0 10px 24px color-mix(in srgb, var(--t1) 10%, transparent), 0 1px 0 var(--bd);
   transform-origin: top center;
+}
+
+/* 任务卡内容压在纹理之上 */
+.flipcard > .fc-top,
+.flipcard > .fc-title,
+.flipcard > .fc-note,
+.flipcard > .fc-meta,
+.flipcard > .fc-acts {
+  position: relative;
+  z-index: 1;
 }
 .flipcard.flipping { animation: flip-in-up 260ms var(--ease-out) both; }
 .flipcard.flipping.down { animation-name: flip-in-down; }
@@ -1991,10 +2095,44 @@ function doClear(): void {
   z-index: 96;
 }
 
-.menu {
+/*
+ * 底部菜单：外层 shell 负责面板外观（圆角、底色、纹理定位），
+ * 内层 .menu 只负责滚动。合成一层的话，滚动时纹理会跟着内容走，
+ * 露出"纹理在飘"的破绽。
+ */
+.menu-shell {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   max-width: 520px;
   margin: 0 auto;
+  border-top: 1px solid var(--bd-strong);
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  background: var(--s1);
+  box-shadow: 0 -8px 32px color-mix(in srgb, var(--bg-grad-3) 60%, transparent);
+  animation: menu-up var(--t-mid) var(--ease-out);
+}
+
+/*
+ * 弹层面板：负责圆角裁切 + 纹理定位。
+ * 里面的 .menu / .modal 是纯内容区（可滚动）。
+ * 分两层的原因：只有一层的话，滚动时纹理会跟着内容一起滚走。
+ */
+.menu-shell {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  background: var(--s1);
+  box-shadow: 0 -8px 32px color-mix(in srgb, var(--bg-grad-3) 60%, transparent);
+  animation: menu-up var(--t-mid) var(--ease-out);
+}
+
+.menu {
   /* 底部菜单最多 88dvh，项目多时可滚，取消条不会被顶出屏幕 */
   max-height: 88vh;
   max-height: 88dvh;
@@ -2002,12 +2140,16 @@ function doClear(): void {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 0 12px calc(10px + var(--safe-bottom-real, 0px));
-  border-top: 1px solid var(--bd-strong);
-  border-top-left-radius: 18px;
-  border-top-right-radius: 18px;
-  background: var(--s1);
-  box-shadow: 0 -8px 32px color-mix(in srgb, var(--bg-grad-3) 60%, transparent);
-  animation: menu-up var(--t-mid) var(--ease-out);
+}
+
+/* 菜单内容压在纹理之上 */
+.menu > .grab,
+.menu > .menu-head,
+.menu > .menu-item,
+.menu > .menu-sep,
+.menu > .menu-cancel {
+  position: relative;
+  z-index: 1;
 }
 
 @keyframes menu-up {
@@ -2125,19 +2267,27 @@ function doClear(): void {
   to { opacity: 1; }
 }
 
-.modal {
+/* 弹窗面板：圆角裁切 + 纹理定位（内容在 .modal 里滚动） */
+.modal-shell {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   max-width: 400px;
-  /* 居中弹窗：margin:auto 保证超高时从顶部开始而不是上下同时溢出 */
   margin: auto;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--bd-strong);
+  background: var(--s1);
+}
+
+.modal {
+  width: 100%;
+  /* 居中弹窗：margin:auto 保证超高时从顶部开始而不是上下同时溢出 */
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   padding: 18px;
-  border-radius: var(--r-lg);
-  border: 1px solid var(--bd-strong);
   background: var(--s1);
 }
 
@@ -2227,7 +2377,7 @@ function doClear(): void {
   background: var(--s1); color: var(--t2);
 }
 .daynav:active { background: var(--s2); color: var(--acc); }
-.dnav-g { font-size: 15px; line-height: 1; }
+.dnav-g { flex: none; }
 .calback {
   display: inline-flex; margin: 0 14px 6px;
   padding: 3px 9px; border-radius: 999px;

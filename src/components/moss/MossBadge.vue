@@ -14,20 +14,28 @@
  * 直接换会有"闪一下"的廉价感；120ms 的过渡让它像灯在亮起来。
  */
 import { computed } from 'vue'
+import MossIcon from './MossIcon.vue'
 
+/**
+ * 2026-10 改版：原来这里是两张写实 3D 渲染图（badge-idle / badge-work），
+ * 靠"眼灯亮/暗"区分状态。两个问题：
+ *   1. 3D 渲染风格和整套线稿界面完全脱节；
+ *   2. 28px 下两张图的差别几乎看不出来，状态传达失败。
+ * 现在换成统一的机器人线稿，"在跑"由 CSS 红晕 + 底座描边表达 ——
+ * 这个在任何尺寸下都看得见，而且不需要第二张图。
+ */
 const props = withDefaults(
   defineProps<{
-    /** 是否有任务在跑。true 时眼灯亮。 */
+    /** 是否有任务在跑。true 时加红色光晕。 */
     working?: boolean
     /** 尺寸（px）。默认 28，够放在标题右侧不抢注意力。 */
     size?: number
-    /** 光晕强度：0 = 不发光（低端机/省电模式） */
+    /** 光晕强度：false = 不发光（低端机/省电模式） */
     glow?: boolean
   }>(),
   { working: false, size: 28, glow: true },
 )
 
-const src = computed(() => (props.working ? '/static/moss/badge-work.webp' : '/static/moss/badge-idle.webp'))
 const boxStyle = computed(() => ({
   width: `${String(props.size)}px`,
   height: `${String(props.size)}px`,
@@ -40,7 +48,7 @@ const boxStyle = computed(() => ({
          会变成"一团白"。给一层深色芯片底座 + 细描边，小图才立得住，
          也顺便让角标看起来像仪表盘上的一个状态灯。 -->
     <view class="plate" />
-    <image class="img" :src="src" mode="aspectFit" />
+    <MossIcon class="img" name="badge" :size="Math.round(props.size * 0.86)" />
   </view>
 </template>
 

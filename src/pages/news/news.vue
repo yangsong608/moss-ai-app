@@ -8,6 +8,8 @@
  */
 import { computed, onUnmounted, ref, watch } from 'vue'
 import WorkShell from '@/components/WorkShell.vue'
+import MossTex from '@/components/moss/MossTex.vue'
+import MossIcon from '@/components/moss/MossIcon.vue'
 import { useWork } from '@/core/workbench'
 import type { NewsItem } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
@@ -187,6 +189,7 @@ onUnmounted(() => {
 
       <view v-if="visibleNews.length > 0" :key="filter" class="news-grid">
         <view v-for="(n, index) in visibleNews" :key="n.id" class="news-card" :class="index < 8 ? `fb-stagger fb-i-${index}` : ''">
+          <MossTex name="news" />
           <view class="nc-head">
             <text class="topic">{{ n.topic }}</text>
             <text class="nc-src">{{ n.source }}</text>
@@ -203,7 +206,7 @@ onUnmounted(() => {
       </view>
 
       <view v-else class="empty fb-empty">
-        <text class="fb-empty-icon">▥</text>
+        <MossIcon class="fb-empty-icon" name="feed" :size="26" />
         <text>这个订阅下暂时没有内容。</text>
         <text class="empty-hint">「立即检索」会把任务派给已连接的设备，回写后自动出现在这里。</text>
       </view>
@@ -305,6 +308,8 @@ onUnmounted(() => {
   column-gap: 12px;
 }
 .news-card {
+  position: relative;
+  overflow: hidden;
   display: inline-block;
   width: 100%;
   vertical-align: top;
@@ -317,6 +322,14 @@ onUnmounted(() => {
   background: var(--s1);
   border: 1px solid var(--bd);
   transition: transform 120ms var(--ease-out), opacity 120ms var(--ease-out);
+}
+/* 卡片内容压在纹理之上 */
+.news-card > .nc-head,
+.news-card > .nc-title,
+.news-card > .nc-sum,
+.news-card > .nc-foot {
+  position: relative;
+  z-index: 1;
 }
 .news-card:active { transform: scale(0.99); }
 .nc-head {
