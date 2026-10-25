@@ -34,7 +34,9 @@ const ROUTES = [
   ['pages/focus/focus', ['专注', '25:00', '开始专注'], '专注计时'],
   ['pages/news/news', ['资讯', '立即检索', '摘要'], '资讯流'],
   ['pages/sessions/sessions', ['会话'], '会话列表'],
+  ['pages/chat/chat', ['没有指定会话', '重连'], '对话页'],
   ['pages/mine/mine', ['我的', '任务', '同步'], '我的'],
+  ['pages/me/me', ['MOSS', '关于'], '关于'],
 ]
 
 const MIME = {
