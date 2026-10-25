@@ -55,7 +55,9 @@ let base = ''
 for (const candidate of CANDIDATES) {
   try {
     const r = await get(candidate, '/workbench-api/health')
-    if (r.status >= 200 && r.status < 500) {
+    // 只认 200：401/404 说明端口有东西在听但不是 DSH 宿主（本机常驻应用很多），
+    // 502 是历史遗留代理（63174 上有一个 upstream 拒连的），都会让后续断言莫名其妙地挂
+    if (r.status === 200) {
       base = candidate
       break
     }
@@ -64,6 +66,7 @@ for (const candidate of CANDIDATES) {
 
 if (base === '') {
   console.error('未找到可达的 DSH 宿主（试过：' + CANDIDATES.join(', ') + '）')
+  console.error('DSH 的 webServer 端口每次启动都变：用 HOST=http://127.0.0.1:<端口> node scripts/e2e-sync.mjs 指定')
   process.exit(1)
 }
 console.log(`e2e-sync · 宿主 ${base}${WRITE ? ' · 写入模式' : ' · 只读模式'}\n`)
