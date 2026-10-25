@@ -64,8 +64,21 @@ if (!el) { console.error(`找不到 ${sel}`); await browser.close(); process.exi
 // 先滚进视口再量坐标——不然 boundingBox 给出视口外坐标，clip 出来是黑的
 await el.evaluate((n) => n.scrollIntoView({ block: 'center', behavior: 'instant' }))
 await new Promise((r) => setTimeout(r, 400))
-const box = await el.boundingBox()
-if (!box) { console.error(`${sel} 不可见`); await browser.close(); process.exit(1) }
+
+// clip 要的是**文档坐标**，el.boundingBox() 给的是**视口坐标** ——
+// 页面滚过之后两者差一个 scrollY，直接拿来用会整体错位
+// （实测 me 页错位 24px，截出来是上一行的文字）。
+// 所以这里用 getBoundingClientRect + scroll 偏移自己算。
+const box = await el.evaluate((n) => {
+  const b = n.getBoundingClientRect()
+  return {
+    x: b.x + window.scrollX,
+    y: b.y + window.scrollY,
+    width: b.width,
+    height: b.height,
+  }
+})
+if (!box || !box.width) { console.error(`${sel} 不可见`); await browser.close(); process.exit(1) }
 
 let clip = { x: box.x, y: box.y, width: box.width, height: box.height }
 if (rect) {

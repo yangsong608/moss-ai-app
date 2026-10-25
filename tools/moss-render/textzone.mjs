@@ -22,6 +22,12 @@ const TARGETS = [
   ['index/index', '.dev'],
   ['today/today', '.quick'],
   ['today/today', '.flipcard'],
+  ['calendar/calendar', '.calbar'],
+  ['calendar/calendar', '.card'],
+  ['focus/focus', '.focus-main'],
+  ['focus/focus', '.pick-row'],
+  ['me/me', '.brand-card'],
+  ['me/me', '.panel'],
 ]
 
 const browser = await puppeteer.launch({

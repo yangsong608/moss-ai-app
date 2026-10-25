@@ -14,6 +14,7 @@ import { state, skin, markUserPreference, type SkinMode } from '@/core/store'
 import { haptic } from '@/core/haptic'
 import MossSheet from '@/components/MossSheet.vue'
 import MossIcon from '@/components/moss/MossIcon.vue'
+import MossTex from '@/components/moss/MossTex.vue'
 
 const skins: { key: SkinMode; name: string; desc: string; dot: string }[] = [
   // desc 必须说人话，而且要说得准：
@@ -156,6 +157,7 @@ function about(): void {
 
         <!-- 品牌区：把 MOSS 主体放进来，让"关于"页有可识别的主体而不是纯文字 -->
         <view class="brand-card">
+          <MossTex name="brand" />
           <view class="brand-img"><MossIcon name="hero" :size="62" /></view>
           <view class="brand-body">
             <text class="brand-h mark mono">MOSS<span class="brand-acc">LINK</span></text>
@@ -181,11 +183,20 @@ function about(): void {
 
 <style lang="scss" scoped>
 .brand-card {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 14px 13px;
   border-top: 1px solid var(--bd);
+}
+
+/* 品牌卡内容压在纹理之上 */
+.brand-card > .brand-img,
+.brand-card > .brand-body {
+  position: relative;
+  z-index: 1;
 }
 
 /* 白金属机身在小尺寸下容易糊成一团，放大后细节才看得见；

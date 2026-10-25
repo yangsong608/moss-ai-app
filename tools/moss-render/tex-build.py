@@ -122,11 +122,34 @@ KEY_MATCH = {
     'ondev': 'on_device',
     'empty': 'disconnected_link',
     'srow': 'conversation_thread',
+    # 日历页
+    'agenda': 'vertical_timeline_ax',
+    # 专注页
+    'timer': 'hourglass',
+    'statbox': 'radial_gauge',
+    # 关于页
+    'brand': 'minimal_emblem',
     # 整页环境背景
     'pagehead': 'wide_and_shallow_celestial',
     'pagemid': 'extremely_simple',
     'pagetail': 'horizon_com',
 }
+
+# 两套皮肤共用一张主图的 key —— 只换线条色，形状不变。
+#
+# ## 为什么需要显式声明
+#
+# 母版入库时做过灰度归一化（RGB → max 通道灰度），色相信息在压缩时就丢了，
+# 抠图又只用亮度当 alpha、颜色全部取自 THEMES[skin]['line']。
+# 也就是说：**一张母版本来就足以供给两套皮肤**，形状完全由它决定。
+#
+# 之前是每套皮肤各出一版主图（两张 AI 生成图），结果 22 张卡片纹理
+# 在两套皮肤下形状都不一样 —— 换肤等于换画，alpha IoU 只有 0.02~0.26。
+# 页面背景层 pagehead / pagemid / pagetail 一直靠 find_raw 的兜底路径
+# 共用主图（IoU = 1.00），卡片纹理也应该这样。
+#
+# 新出的 4 类（日历议程 / 计时 / 统计 / 品牌徽记）直接按这个规则走。
+SHARED_MASTER_KEYS = {'agenda', 'timer', 'statbox', 'brand'}
 
 
 def _load_skin_manifest() -> dict[str, str]:
@@ -180,6 +203,14 @@ def find_raw(key: str, skin: str) -> str | None:
         return None
 
     manifest = _load_skin_manifest()
+
+    if key in SHARED_MASTER_KEYS:
+        # 共用主图：只认清单里标为 moss 的那一张，两套皮肤都用它。
+        # 清单缺失时退回第一张（母版只有一版时天然就是这个结果）。
+        shared = [h for h in hits
+                  if manifest.get(f'raw/{os.path.basename(h)}') == 'moss']
+        return shared[0] if shared else hits[0]
+
     if manifest:
         matched = [
             h for h in hits
@@ -303,7 +334,8 @@ def _alpha_centroid(img: Image.Image) -> tuple[float, float]:
 
 def place(graphic: Image.Image, out_w: int, out_h: int,
           anchor: tuple[float, float, float, float],
-          focus: tuple[float, float] | None = None) -> Image.Image:
+          focus: tuple[float, float] | None = None,
+          force_contain: bool = False) -> Image.Image:
     """
     把图形放进 anchor 矩形里，贴在输出图的对应位置。
 
@@ -319,12 +351,16 @@ def place(graphic: Image.Image, out_w: int, out_h: int,
     再缩放到 anchor 矩形。裁切保留了图形在该比例下的全部细节，
     且不会因为比例悬殊而浪费空间。
 
-    ## 两道保险
+    ## 三道保险
 
     1. **比例失配保护**（MIN_KEEP）：按锚区比例裁完只剩不到 55% 的图形时，
        改为完整容纳 —— 图形小一点，但语义完整。
     2. **重心自适应**：focus 手写容易偏（实测 20 张卡里 4 张偏了 0.3+），
        所以裁切中心优先取图形自己的 alpha 重心，focus 只作微调。
+    3. **显式完整容纳**（force_contain）：有些图形是**闭合框**，
+       裁一刀就破相 —— 关于页的 MOSS 徽记（圆角方框 + 菱形），
+       按宽高比裁掉 6% 就会把上下两条边框切没，只剩一个菱形。
+       这种图不能用比例启发式判断，规格里显式写 'place': 'contain'。
     """
     canvas = Image.new('RGBA', (out_w, out_h), (0, 0, 0, 0))
 
@@ -338,7 +374,7 @@ def place(graphic: Image.Image, out_w: int, out_h: int,
     src_ratio = g.width / g.height
     keep = min(src_ratio, target_ratio) / max(src_ratio, target_ratio)
 
-    if keep >= MIN_KEEP:
+    if keep >= MIN_KEEP and not force_contain:
         # 比例接近 → 按锚区比例裁一块，保留细节
         # 裁切中心：图形 alpha 重心，focus 作为微调偏移
         cx0, cy0 = _alpha_centroid(g)
@@ -476,7 +512,8 @@ def build(skin: str, spec: dict, raw: Image.Image) -> tuple[str, int]:
     else:
         anchor = spec.get('anchor')
         if anchor:
-            im = place(graphic, out_w, out_h, anchor, spec.get('focus'))
+            im = place(graphic, out_w, out_h, anchor, spec.get('focus'),
+                       force_contain=(spec.get('place') == 'contain'))
         else:
             im = full_bleed(graphic, out_w, out_h, spec)
 

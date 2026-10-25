@@ -29,7 +29,8 @@ OUT = os.path.normpath(os.path.join(HERE, '../../src/static/moss/tex'))
 SCALE = 1.5
 
 KEYS = ['news', 'console', 'quick', 'note', 'dev', 'sync', 'flipcard',
-        'caldate', 'nbcol', 'modal', 'hero', 'stat', 'empty', 'ovcard']
+        'caldate', 'nbcol', 'modal', 'hero', 'stat', 'empty', 'ovcard',
+        'agenda', 'timer', 'statbox', 'brand']
 
 specs = {}
 for s in list(CARD_SPECS) + list(PAGE_SPECS):

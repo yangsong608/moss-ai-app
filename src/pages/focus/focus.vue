@@ -18,6 +18,7 @@ import { addFocus, updateTask, useWork, domainStats } from '@/core/workbench'
 import type { Task } from '@/core/workbench'
 import { haptic } from '@/core/haptic'
 import MossIcon from '@/components/moss/MossIcon.vue'
+import MossTex from '@/components/moss/MossTex.vue'
 
 const { data } = useWork()
 
@@ -219,6 +220,7 @@ onUnmounted(() => {
       <view class="focus-main">
         <!-- 计时区 -->
         <view class="timer-card fb-enter-card">
+          <MossTex name="timer" />
           <text class="eyebrow">FOCUS CONSOLE / {{ presetMin }} MIN</text>
           <view class="timer-dial">
             <view class="dial-glow" :class="{ live: phase === 'running' }" />
@@ -296,14 +298,17 @@ onUnmounted(() => {
           </view>
           <view class="statgrid">
             <view class="statbox">
+              <MossTex name="statbox" />
               <text class="stat-v mono">{{ todayRounds }}</text>
               <text class="stat-l">完成轮次</text>
             </view>
             <view class="statbox">
+              <MossTex name="statbox" />
               <text class="stat-v mono">{{ todayMinutes }}</text>
               <text class="stat-l">专注分钟</text>
             </view>
             <view class="statbox">
+              <MossTex name="statbox" />
               <text class="stat-v mono">{{ todayRate }}%</text>
               <text class="stat-l">完成率</text>
             </view>
@@ -389,6 +394,8 @@ onUnmounted(() => {
 }
 .glass-card,
 .timer-card {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--bd);
   border-radius: 20px;
   background:
@@ -666,6 +673,8 @@ onUnmounted(() => {
   gap: 9px;
 }
 .statbox {
+  position: relative;
+  overflow: hidden;
   min-width: 0;
   padding: 15px 12px;
   border-radius: 18px;
@@ -677,6 +686,19 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+/* 卡片内容压在纹理之上（纹理由 MossTex 铺在卡内空白带） */
+.timer-card > .eyebrow,
+.timer-card > .timer-dial,
+.timer-card > .presets,
+.timer-card > .timer-btns,
+.timer-card > .done-row,
+.timer-card > .task-pick,
+.statbox > .stat-v,
+.statbox > .stat-l {
+  position: relative;
+  z-index: 1;
 }
 .stat-v {
   color: var(--t1);

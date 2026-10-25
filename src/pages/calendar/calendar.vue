@@ -35,6 +35,7 @@ import WorkShell from '@/components/WorkShell.vue'
 import WorkTaskDetail from '@/components/WorkTaskDetail.vue'
 import MossSheet, { type SheetItem } from '@/components/MossSheet.vue'
 import MossIcon from '@/components/moss/MossIcon.vue'
+import MossTex from '@/components/moss/MossTex.vue'
 import {
   STATUS_META,
   WEEKDAYS,
@@ -1899,8 +1900,9 @@ watch(calView, (v) => {
       </view>
 
       <view class="card">
+        <MossTex name="agenda" />
         <!-- 翻页只包裹列表本体（不含下方输入框，避免输入被重建）：
-             换 key 重建 + 入场动画，收尾 transform: none（不留 fixed 包含块）。 -->
+             换 key 重建 + 入入场动画，收尾 transform: none（不留 fixed 包含块）。 -->
         <view
           :key="pageKey"
           class="agenda-page"
@@ -2621,10 +2623,19 @@ watch(calView, (v) => {
 .line { flex: 1; height: 1px; background: var(--bd); }
 
 .card {
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--bd);
   border-radius: var(--r-lg);
   background: var(--s1);
   padding: 2px 12px 10px;
+}
+
+/* 议程内容压在纹理之上（纹理由 MossTex 铺在卡内空白带） */
+.card > .agenda-page,
+.card > .addrow {
+  position: relative;
+  z-index: 1;
 }
 
 /* 按天翻页：内容位移 24px + 淡入，240ms（要求 220–260ms）。

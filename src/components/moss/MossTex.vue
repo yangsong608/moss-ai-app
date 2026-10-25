@@ -57,6 +57,11 @@ import { skinClass, themeClass, state } from '@/core/store'
  *   console 我的页控制台卡
  *   srow    会话行
  *   dev     首页设备卡
+ *   agenda  日历页议程卡
+ *
+ *   timer   专注页计时卡      → 沙漏
+ *   statbox 专注页统计小卡    → 径向仪表盘
+ *   brand   关于页品牌卡      → MOSS 徽记
  *
  *   index 页：empty 空态 / ondev 本地域卡
  *   mine 页：local 本地域卡 / sync 同步行 / ovcard 总览卡
@@ -73,6 +78,8 @@ type TexKey =
   | 'note' | 'reader' | 'placeholder' | 'nbcol'
   | 'news' | 'console'
   | 'srow' | 'dev'
+  | 'agenda'
+  | 'timer' | 'statbox' | 'brand'
   | 'empty' | 'ondev' | 'local' | 'sync' | 'ovcard'
 
 const props = withDefaults(
